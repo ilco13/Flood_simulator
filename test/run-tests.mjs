@@ -17,7 +17,7 @@ async function test(name, fn) {
 }
 
 await test('hyétogrammes : le cumul final vaut le total', () => {
-  for (const shape of ['uniform', 'desbordes', 'early', 'late']) {
+  for (const shape of ['uniform', 'desbordes', 'early', 'late', 'chicago']) {
     const h = makeHyetograph({ totalMm: 100, durationH: 24, shape });
     assert.ok(Math.abs(h.cumulative(24 * 3600) - 100) < 1e-6, shape);
     // intégrale numérique de l'intensité = cumul

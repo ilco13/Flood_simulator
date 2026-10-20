@@ -31,7 +31,7 @@ Le calcul tourne **dans le navigateur**, sur la carte graphique (WebGPU) quand e
 
 ## Modèle
 
-- **Pluie** : hyétogramme uniforme ou double triangle de Desbordes (pointe au début, au milieu ou à la fin), intégré exactement à chaque pas de temps.
+- **Pluie** : hyétogramme Chicago (par défaut : les hauteurs tombées sur 6 min, 30 min, 1 h… suivent la loi de Montana, b = 0,433 à Aix pour 100 ans), uniforme ou double triangle de Desbordes, intégré exactement à chaque pas de temps.
 - **Pluie nette** : méthode SCS Curve Number par maille. Le CN dépend de la classe COSIA et du groupe de sol, et il est ajusté selon l'humidité initiale (AMC I/II/III). Un multiplicateur de rétention permet de caler le modèle.
 - **Écoulement** : équations « inertie locale » (Bates et al. 2010), avec la pondération θ = 0,9 de de Almeida et al. (2012) et un frottement de Manning semi-implicite. Le pas de temps est adaptatif (CFL 0,6). Un limiteur proportionnel des sorties de chaque maille garantit la positivité et la **conservation exacte de la masse**. Les bords sont des sorties libres.
 - **Préparation du relief** :
@@ -53,6 +53,7 @@ npm run build      # version de production dans dist/
 
 Autres outils de test :
 
+- `node test/local-run.mjs <dossier> <res> <mm> <h> <forme> <amc> <après h> <sortie>` : simulation fine d'un petit secteur autour d'un point (débit dans le vallat, hauteur d'eau au point) ;
 - `node test/real-run.mjs <dossier> <res>` : simulation complète hors navigateur sur des données IGN téléchargées (MNT `.bil`, COSIA `.rgba`, BD TOPO `.json`) ;
 - `node test/gpu-vs-cpu.cjs` : compare les solveurs GPU et CPU dans Chromium (Playwright, avec le serveur de développement lancé) ;
 - `node test/e2e.cjs <url> <dossier>` : parcours complet dans le navigateur, avec captures d'écran.

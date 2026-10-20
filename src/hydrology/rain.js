@@ -6,16 +6,21 @@ export const SHAPES = {
   desbordes: 'Double triangle de Desbordes (pointe centrale)',
   early: 'Orage en début d\'épisode',
   late: 'Orage en fin d\'épisode',
+  chicago: 'Chicago (intensités cohérentes avec les courbes de Montana)',
 };
+
+// Exposant b de Montana utilisé pour la forme Chicago (Aix-en-Provence, 100 ans : b = 0,433).
+export const MONTANA_B = 0.433;
 
 /**
  * Construit une fonction intensité i(t) (mm/h) et cumul P(t) (mm), t en secondes.
  * Double triangle (Desbordes) : un triangle « de fond » sur toute la durée et un triangle
  * intense de durée d = D/6 contenant la moitié du cumul, centré sur la position de pointe.
  */
-export function makeHyetograph({ totalMm, durationH, shape = 'desbordes' }) {
+export function makeHyetograph({ totalMm, durationH, shape = 'desbordes', montanaB = MONTANA_B }) {
   const D = durationH * 3600;
   const P = totalMm;
+  if (shape === 'chicago') return chicago(P, D, montanaB);
   let parts;
   if (shape === 'uniform') {
     parts = [{ t0: 0, t1: D, tp: null, vol: P }];
@@ -66,6 +71,32 @@ export function makeHyetograph({ totalMm, durationH, shape = 'desbordes' }) {
       let m = 0;
       for (let k = 0; k <= 2000; k++) m = Math.max(m, this.intensity((k / 2000) * D));
       return m;
+    },
+  };
+}
+
+/**
+ * Pluie de projet « Chicago » centrée : pour toute durée w autour de la pointe, la hauteur
+ * tombée vaut H(w) = P·(w/D)^(1−b), comme le prévoit une loi de Montana i = a·t^(−b).
+ * Les intensités sur 6 min, 30 min, 1 h… restent ainsi cohérentes avec la même période de retour.
+ */
+function chicago(P, D, b) {
+  const tp = D / 2;
+  const H = (w) => P * Math.pow(Math.min(Math.max(w, 0), D) / D, 1 - b);
+  const cumulative = (t) => {
+    if (t <= 0) return 0;
+    if (t >= D) return P;
+    const w = 2 * Math.abs(t - tp);
+    return P / 2 + (t >= tp ? 1 : -1) * (H(w) / 2);
+  };
+  return {
+    durationS: D,
+    totalMm: P,
+    cumulative,
+    // intensité moyenne sur 1 min (la loi est infinie à la pointe)
+    intensity: (t) => ((cumulative(t + 30) - cumulative(t - 30)) / 60) * 3600,
+    peakMmH() {
+      return ((cumulative(tp + 180) - cumulative(tp - 180)) / 360) * 3600;
     },
   };
 }

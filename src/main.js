@@ -182,7 +182,7 @@ function setupUi() {
     o.textContent = v;
     shapeSel.appendChild(o);
   }
-  shapeSel.value = 'desbordes';
+  shapeSel.value = 'chicago';
 
   document.querySelectorAll('.chips').forEach((box) => {
     const target = $(box.dataset.target);
