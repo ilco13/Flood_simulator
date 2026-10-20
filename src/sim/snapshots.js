@@ -24,13 +24,13 @@ export function dequantize(v) {
 
 const canCompress = typeof CompressionStream !== 'undefined';
 
-async function compress(bytes) {
+export async function compress(bytes) {
   if (!canCompress) return bytes;
   const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream('deflate-raw'));
   return new Blob([await new Response(stream).arrayBuffer()]);
 }
 
-async function decompress(stored) {
+export async function decompress(stored) {
   if (!(stored instanceof Blob)) return stored;
   const stream = stored.stream().pipeThrough(new DecompressionStream('deflate-raw'));
   return new Uint8Array(await new Response(stream).arrayBuffer());

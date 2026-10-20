@@ -184,3 +184,21 @@ export function refreshWater(map) {
 export function setGeoJson(map, id, data) {
   map.getSource(id)?.setData(data || EMPTY);
 }
+
+/** Cadre la carte sur des coins [lon, lat], en tenant compte du panneau sur téléphone. */
+export function fitBoundsOf(map, corners) {
+  const lons = corners.map((c) => c[0]);
+  const lats = corners.map((c) => c[1]);
+  const mobile = window.matchMedia('(max-width: 760px)').matches;
+  map.fitBounds(
+    [
+      [Math.min(...lons), Math.min(...lats)],
+      [Math.max(...lons), Math.max(...lats)],
+    ],
+    {
+      padding: mobile ? { top: 20, left: 20, right: 20, bottom: Math.round(window.innerHeight * 0.58) + 20 } : 30,
+      pitch: map.getPitch(),
+      duration: 800,
+    },
+  );
+}

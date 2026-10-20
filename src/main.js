@@ -13,6 +13,8 @@ import { cacheClear } from './data/cache.js';
 import { stableDt } from './sim/scheme.js';
 import { setTerrain3d, setExaggeration, Toggle3dControl } from './terrain3d.js';
 import { Water3DLayer } from './render/water3d.js';
+import { packRun, saveRun, listRuns, loadRun, deleteRun, renameRun, exportRun, importRun, formatSize } from './data/runStore.js';
+import { fitBoundsOf } from './map.js';
 
 const $ = (id) => document.getElementById(id);
 const GPU_CELL_CAP = 16e6;
@@ -249,6 +251,19 @@ function setupUi() {
     if (state.is3d) setExaggeration(state.map, Number($('exag').value));
   });
   $('play').onclick = togglePlay;
+  $('import-file').addEventListener('change', async (e) => {
+    const f = e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    try {
+      const meta = await importRun(f);
+      await refreshSaved();
+      openSaved(meta.id);
+    } catch (err) {
+      prog.error(`Import impossible : ${err.message || err}`);
+    }
+  });
+  refreshSaved();
 
   $('legend').innerHTML = LEGEND.map(
     (l) => `<span><i style="background:rgb(${l.color.join(',')})"></i>${l.label}</span>`,
@@ -683,6 +698,7 @@ function finishRun(run, mass) {
   );
   drawHydro();
   if (state.probe) probeAt(state.probe);
+  autoSave(run, stopped);
 }
 
 /* ---------- Affichage ---------- */
@@ -838,6 +854,192 @@ async function probeAt(lngLat) {
   }
 }
 
+/* ---------- Simulations enregistrées ---------- */
+
+const AMC_LABEL = { 1: 'sol sec', 2: 'sol normal', 3: 'sol saturé' };
+const fmtShort = (v) => String(+Number(v).toFixed(2)).replace('.', ',');
+
+// La carte se charge de façon asynchrone : l'ouverture d'une simulation doit l'attendre.
+let resolveMapReady;
+const mapReady = new Promise((r) => (resolveMapReady = r));
+
+function runName(p, partial) {
+  const zone = p.zone === 'basin' ? 'bassin' : 'zone';
+  return `${fmtShort(p.rainMm)} mm en ${fmtShort(p.rainH)} h · ${AMC_LABEL[p.amc]} · ${zone} ${p.res} m${partial ? ' (partielle)' : ''}`;
+}
+
+async function autoSave(run, partial) {
+  if (run.restored || !run.maxima || !run.store.length) return;
+  let note = $('save-note');
+  if (!note) {
+    note = document.createElement('p');
+    note.id = 'save-note';
+    $('summary').after(note);
+  }
+  note.className = 'hint';
+  note.textContent = 'Enregistrement de la simulation…';
+  try {
+    const rec = await packRun({
+      name: runName(run.params, partial),
+      params: run.params,
+      grid: run.grid,
+      totalTime: run.totalTime,
+      tEnd: run.tEnd ?? run.totalTime,
+      store: run.store,
+      series: run.series,
+      gauges: run.gauges,
+      maxima: run.maxima,
+      dem: state.data.dem,
+      outline: state.data.outline,
+      rivers: state.data.rivers,
+      summary: $('summary').innerHTML,
+      warnings: state.data.warnings,
+    });
+    await saveRun(rec);
+    run.savedId = rec.meta.id;
+    note.textContent = `Simulation enregistrée dans ce navigateur (${formatSize(rec.meta.size)}).`;
+  } catch (e) {
+    console.error(e);
+    note.className = 'hint warn';
+    note.textContent = `Enregistrement impossible : ${e.message || e}. Supprimez d'anciennes simulations pour libérer de la place.`;
+  }
+  refreshSaved();
+}
+
+async function refreshSaved() {
+  const ul = $('saved-list');
+  let runs = [];
+  try {
+    runs = await listRuns();
+  } catch {
+    ul.innerHTML = '<li class="empty">Stockage indisponible dans ce navigateur (navigation privée ?).</li>';
+    return;
+  }
+  if (!runs.length) {
+    ul.innerHTML = '<li class="empty">Aucune simulation enregistrée pour l\'instant.</li>';
+    return;
+  }
+  ul.innerHTML = '';
+  for (const r of runs) {
+    const li = document.createElement('li');
+    if (state.run?.savedId === r.id) li.className = 'current';
+    const d = new Date(r.created);
+    li.innerHTML = `<div class="s-name"></div>
+      <div class="s-meta">${d.toLocaleDateString('fr-FR')} ${d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })} · ${formatSize(r.size)}${r.imported ? ' · importée' : ''}</div>
+      <div class="s-actions">
+        <button class="open">Ouvrir</button><button class="exp">Exporter</button>
+        <button class="ren">Renommer</button><button class="del">Supprimer</button>
+      </div>`;
+    li.querySelector('.s-name').textContent = r.name;
+    li.querySelector('.open').onclick = () => openSaved(r.id);
+    li.querySelector('.exp').onclick = async () => {
+      const blob = await exportRun(r.id);
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `${r.name.replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-|-$/g, '').toLowerCase()}.crue`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    };
+    li.querySelector('.ren').onclick = async () => {
+      const name = prompt('Nouveau nom :', r.name);
+      if (name && name.trim()) {
+        await renameRun(r.id, name.trim());
+        refreshSaved();
+      }
+    };
+    li.querySelector('.del').onclick = async () => {
+      if (!confirm(`Supprimer « ${r.name} » ?`)) return;
+      await deleteRun(r.id);
+      refreshSaved();
+    };
+    ul.appendChild(li);
+  }
+}
+
+/** Rouvre une simulation enregistrée sans rien recalculer. */
+async function openSaved(id) {
+  if (state.run?.running) {
+    prog.error('Une simulation est en cours : arrêtez-la avant d\'en ouvrir une autre.');
+    return;
+  }
+  stopPlay();
+  prog.start();
+  prog.status('Ouverture de la simulation enregistrée…');
+  try {
+    await mapReady;
+    const r = await loadRun(id);
+    const { meta } = r;
+    const grid = meta.grid;
+    // Paramètres de la simulation, pour mémoire
+    const p = meta.params;
+    $('rain-mm').value = p.rainMm;
+    $('rain-h').value = p.rainH;
+    $('rain-shape').value = p.shape;
+    $('soil').value = p.soil;
+    state.amc = p.amc;
+    $('amc').querySelectorAll('button').forEach((b) => b.classList.toggle('on', Number(b.dataset.v) === p.amc));
+    $('tail-h').value = p.tailH;
+    updateRainInfo();
+
+    state.data = {
+      key: `enregistrée:${id}`,
+      grid,
+      dem: r.dem,
+      gauges: r.gauges,
+      outline: r.outline,
+      rivers: r.rivers,
+      warnings: r.warnings,
+      mask: null,
+    };
+    showContext(state.data);
+    const store = new SnapshotStore();
+    store.items = r.snaps.map((s) => ({ t: s.t, data: s.blob }));
+    const run = {
+      running: false,
+      stop: false,
+      restored: true,
+      savedId: id,
+      params: p,
+      grid,
+      store,
+      series: r.series,
+      gauges: r.gauges,
+      totalTime: meta.totalTime,
+      tEnd: meta.tEnd,
+      maxima: r.maxima,
+      maxQ: quantize(r.maxima.hmax),
+      follow: false,
+      t0: performance.now(),
+    };
+    state.run = run;
+    run.water = new WaterCanvas(grid.nx, grid.ny);
+    setWaterCanvas(state.map, run.water.canvas, gridCornersWgs(grid));
+    setLayerVisible('water', document.querySelector('[data-layer=water]').checked);
+    state.water3dGrid = null;
+    state.lastQ = null;
+    if (state.is3d) ensureWater3d();
+    fitBoundsOf(state.map, gridCornersWgs(grid));
+
+    $('gauge-legend').innerHTML = '';
+    $('results').hidden = false;
+    $('time').max = Math.max(0, store.length - 1);
+    $('time').value = $('time').max;
+    state.viewMode = 'max';
+    $('view-mode').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x.dataset.v === 'max'));
+    $('summary').innerHTML = r.summary || '';
+    if ($('save-note')) $('save-note').textContent = `Simulation enregistrée le ${new Date(meta.created).toLocaleString('fr-FR')}.`;
+    await renderCurrent();
+    drawHydro();
+    for (const k of Object.keys(STEPS)) prog.set(k, 1, 'enregistré');
+    prog.finish(`Simulation rouverte : ${meta.name}`);
+    refreshSaved();
+    $('results').scrollIntoView({ block: 'start', behavior: 'smooth' });
+  } catch (e) {
+    console.error(e);
+    prog.error(`Ouverture impossible : ${e.message || e}`);
+  }
+}
+
 /* ---------- Vue 3D ---------- */
 
 /** (Re)construit le maillage de la nappe 3D pour la simulation courante. */
@@ -896,6 +1098,7 @@ async function main() {
   state.map.addLayer(state.water3d, 'rivers');
   state.ctrl3d = new Toggle3dControl((on) => toggle3d(on));
   state.map.addControl(state.ctrl3d, 'top-right');
+  resolveMapReady();
   if (gpu) {
     gpu.device.lost.then((info) => {
       state.gpu = null;

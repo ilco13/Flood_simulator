@@ -513,3 +513,61 @@ button.icon {
 #map-status.ok {
   background: rgba(46, 158, 91, 0.95);
 }
+
+/* Simulations enregistrées */
+.saved {
+  list-style: none;
+  margin: 6px 0;
+  padding: 0;
+}
+.saved li {
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+.saved li.current .s-name::before {
+  content: '● ';
+  color: var(--accent);
+}
+.saved .s-name {
+  font-weight: 600;
+  font-size: 13px;
+}
+.saved .s-meta {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 2px 0 6px;
+}
+.saved .s-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.saved button,
+.file-btn {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  border-radius: 7px;
+  padding: 4px 9px;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.saved button.open {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+.saved button.del {
+  color: var(--danger);
+}
+.file-btn {
+  display: inline-block;
+  margin-top: 6px;
+  color: var(--muted);
+}
+.saved .empty {
+  color: var(--muted);
+  font-size: 12.5px;
+  border: 0;
+}

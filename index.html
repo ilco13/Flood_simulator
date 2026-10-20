@@ -141,6 +141,16 @@
             <p id="summary" class="hint"></p>
           </section>
 
+          <section id="saved">
+            <h2>Simulations enregistrées</h2>
+            <p class="hint">
+              Chaque simulation terminée est enregistrée dans ce navigateur. Exportez-la en fichier
+              « .crue » pour la rouvrir sur un autre ordinateur.
+            </p>
+            <ul id="saved-list" class="saved"></ul>
+            <label class="ghost file-btn">Importer un fichier .crue<input type="file" id="import-file" accept=".crue" hidden /></label>
+          </section>
+
           <section>
             <h2>Couches</h2>
             <label class="check"><input type="checkbox" data-layer="water" checked /> Eau simulée</label>
