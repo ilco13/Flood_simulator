@@ -194,10 +194,9 @@ export function drawSection(canvas, s) {
   const ground = new Float32Array(n);
   for (let i = 0; i < n; i++) ground[i] = s.fine && Number.isFinite(s.fine[i]) ? s.fine[i] : pts[i].zi;
   // Niveaux d'eau (surface libre) à l'instant et maximum, tirés de la simulation
-  const reach = s.cell || 5;
-  const level = poolLevels(pts, ground, (p) => p.h, 0.05, reach);
+  const level = poolLevels(pts, ground, (p) => p.h, 0.05);
   // Le niveau max n'est tracé que là où l'eau a dépassé 10 cm (pas la lame de ruissellement).
-  const levelMax = poolLevels(pts, ground, (p) => p.hmax, 0.1, reach);
+  const levelMax = poolLevels(pts, ground, (p) => p.hmax, 0.1);
 
   let zmin = Infinity;
   let zmax = -Infinity;
@@ -445,61 +444,51 @@ export function drawSection(canvas, s) {
 }
 
 /**
- * Niveau de chaque « poche » d'eau de la coupe. La simulation donne une hauteur par maille
- * (5 à 25 m) alors que le terrain est dessiné au LiDAR fin : pour chaque suite d'échantillons
- * mouillés, on pose la hauteur simulée la plus forte sur le point le plus bas du terrain fin,
- * ce qui donne une surface plate et une profondeur fidèle à la simulation.
+ * Surface libre de l'eau le long de la coupe.
+ * Pour chaque suite d'échantillons mouillés dans la simulation, le niveau est la cote d'eau
+ * simulée (terrain du modèle + hauteur), moyennée en donnant plus de poids aux mailles les plus
+ * profondes : la surface est plate en travers, comme dans la réalité. Ce niveau est ensuite posé
+ * sur le terrain LiDAR fin et propagé de part et d'autre tant que le terrain reste plus bas que
+ * lui : l'eau remplit le fond du lit et passe par-dessus une berge plus basse que la surface,
+ * sans jamais « tenir debout » au-dessus d'une berge.
  */
-function poolLevels(pts, ground, depthOf, thr, reach) {
+function poolLevels(pts, ground, depthOf, thr) {
   const n = pts.length;
-  const raw = new Float32Array(n).fill(NaN);
+  const out = new Float32Array(n).fill(NaN);
   let i = 0;
   while (i < n) {
-    if (!(depthOf(pts[i]) > thr)) {
+    if (!(depthOf(pts[i]) > thr) || !Number.isFinite(pts[i].zc)) {
       i++;
       continue;
     }
     let j = i;
-    let hBest = 0;
-    while (j < n && depthOf(pts[j]) > thr) {
-      hBest = Math.max(hBest, depthOf(pts[j]));
+    let sw = 0;
+    let swl = 0;
+    while (j < n && depthOf(pts[j]) > thr && Number.isFinite(pts[j].zc)) {
+      const h = depthOf(pts[j]);
+      sw += h;
+      swl += h * (pts[j].zc + h);
       j++;
     }
-    // fond le plus bas du terrain fin autour de la poche (une maille de marge)
-    const d0 = pts[i].d - reach;
-    const d1 = pts[j - 1].d + reach;
-    let zMin = Infinity;
-    for (let k = 0; k < n; k++) if (pts[k].d >= d0 && pts[k].d <= d1 && ground[k] < zMin) zMin = ground[k];
-    const L = zMin + hBest;
-    for (let k = i; k < j; k++) raw[k] = L;
-    i = j;
-  }
-  return spreadLevel(raw, ground, pts, reach);
-}
-
-/**
- * La simulation donne un niveau par maille (5 à 25 m) alors que le terrain est dessiné à 0,5 m :
- * on prolonge la surface libre à l'horizontale vers les échantillons voisins plus bas qu'elle,
- * sur au plus une maille, pour que l'eau remplisse le fond du lit à niveau.
- */
-function spreadLevel(raw, ground, pts, reach) {
-  const n = raw.length;
-  const out = Float32Array.from(raw);
-  for (const dir of [1, -1]) {
-    let src = NaN;
-    let srcD = 0;
-    for (let k = dir > 0 ? 0 : n - 1; k >= 0 && k < n; k += dir) {
-      if (Number.isFinite(raw[k])) {
-        src = raw[k];
-        srcD = pts[k].d;
-        continue;
+    const L = swl / sw;
+    // Point de départ : le terrain fin le plus bas de la poche (s'il est sous le niveau).
+    let k0 = i;
+    for (let k = i; k < j; k++) if (ground[k] < ground[k0]) k0 = k;
+    if (ground[k0] < L) {
+      for (const dir of [1, -1]) {
+        for (let k = k0; k >= 0 && k < n && ground[k] < L; k += dir) {
+          if (!(out[k] >= L)) out[k] = L;
+        }
       }
-      if (Number.isFinite(src) && Math.abs(pts[k].d - srcD) <= reach && ground[k] < src) {
-        if (!(out[k] >= src)) out[k] = src;
-      } else {
-        src = NaN;
+      // Autres creux de la poche séparés par une bosse émergée (îlot) : remplis aussi.
+      for (let k = i; k < j; k++) {
+        if (Number.isFinite(out[k]) || !(ground[k] < L)) continue;
+        for (const dir of [1, -1]) {
+          for (let m = k; m >= 0 && m < n && ground[m] < L; m += dir) if (!(out[m] >= L)) out[m] = L;
+        }
       }
     }
+    i = j;
   }
   return out;
 }
