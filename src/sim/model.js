@@ -35,18 +35,38 @@ export function prepareTerrain({ grid, dem, rivers, burnDepth, outlet, upstreamO
     mask = r.mask;
     basinCells = r.cells;
   } else if (upstreamOf) {
-    // Bassin versant d'un point choisi : toutes les mailles en amont de ce point.
+    // Bassin versant d'un ou plusieurs points : toutes les mailles en amont (union).
+    const pts = Array.isArray(upstreamOf) ? upstreamOf : [upstreamOf];
     const down = flowDirections(filled, parent, order, grid.nx, grid.ny);
     const acc = accumulation(down, order);
-    const k = snapToStream(grid, acc, upstreamOf);
-    if (k >= 0) {
+    const outletKs = [];
+    for (const pt of pts) {
+      const k = snapToStream(grid, acc, pt);
+      if (k < 0) continue;
+      outletKs.push(k);
       const r = upstreamMask(down, order, k);
-      mask = r.mask;
-      basinCells = r.cells;
-      return { z, mask, basinCells, burned, breached, outletK: k, acc };
+      if (!mask) mask = r.mask;
+      else for (let n = 0; n < mask.length; n++) mask[n] |= r.mask[n];
+    }
+    if (mask) {
+      basinCells = 0;
+      for (let n = 0; n < mask.length; n++) basinCells += mask[n];
+      return { z, mask, basinCells, burned, breached, outletK: outletKs[0], outletKs, acc };
     }
   }
   return { z, mask, basinCells, burned, breached };
+}
+
+/** Relief conditionné et réseau d'écoulement D8 (pour délimiter des bassins versants). */
+export function flowModel({ grid, dem, rivers, burnDepth }) {
+  const z = dem.slice();
+  if (rivers && burnDepth > 0) burnRivers(grid, z, rivers, burnDepth);
+  const { parent, order, filled } = drainageLabels(z, grid.nx, grid.ny, {
+    maxDepth: Math.max(2, 0.3 * grid.dx),
+    maxLength: Math.max(4, Math.round(300 / grid.dx)),
+  });
+  const down = flowDirections(filled, parent, order, grid.nx, grid.ny);
+  return { z, down, order, acc: accumulation(down, order) };
 }
 
 /**
@@ -58,9 +78,10 @@ export function prepareTerrain({ grid, dem, rivers, burnDepth, outlet, upstreamO
  *    petite surface drainée qui la dépasse, pour rester sur le même cours d'eau sans sauter
  *    dans une rivière plus grosse toute proche.
  */
-export function snapToStream(grid, acc, { x, y, areaM2 = 0, minAreaM2 = 0, radiusM = 0 }) {
+export function snapToStream(grid, acc, { x, y, areaM2 = 0, minAreaM2 = 0, radiusM = 0, exact = false }) {
   const c = cellOf(grid, x, y);
   if (!c) return -1;
+  if (exact) return c.k;
   const cellArea = grid.dx * grid.dx;
   const r = Math.max(2, Math.round((radiusM || (areaM2 ? 150 : 60)) / grid.dx));
   let best = -1;

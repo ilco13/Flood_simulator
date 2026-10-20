@@ -4,10 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#0b2540" />
-    <title>Crue de l'Arc</title>
+    <title>Simulateur de crue</title>
     <meta
       name="description"
-      content="Simulateur d'inondation pluie-sur-maillage de la haute vallée de l'Arc (Bouches-du-Rhône) sur le relief LiDAR HD de l'IGN."
+      content="Simulateur d'inondation pluie-sur-maillage sur le relief LiDAR HD de l'IGN, partout en France."
     />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M16 3C11 11 7 16 7 21a9 9 0 0 0 18 0c0-5-4-10-9-18z' fill='%232b7de9'/></svg>" />
     <link rel="stylesheet" href="./src/style.css" />
@@ -67,21 +67,19 @@
             <h2>Calcul</h2>
             <label>Zone
               <select id="zone">
-                <option value="basin">Haute vallée de l'Arc (bassin entier)</option>
-                <option value="view">Zone affichée à l'écran (détail fin)</option>
+                <option value="study">Bassins versants du lieu étudié (partout en France)</option>
+                <option value="view">Zone affichée à l'écran</option>
+                <option value="basin">Préréglage : haute vallée de l'Arc</option>
               </select>
             </label>
             <p id="zone-hint" class="hint"></p>
             <div id="catch-box" hidden>
-              <p class="hint">
-                Choisissez le point à étudier (dans le lit du vallat) : l'application trace tout le bassin versant
-                qui l'alimente, pour savoir jusqu'où dézoomer.
-              </p>
               <div class="btn-row">
-                <button id="catch-pick" class="ghost" type="button">Choisir le point étudié</button>
-                <button id="catch-fit" class="ghost" type="button" disabled>Cadrer sur son bassin</button>
+                <button id="catch-pick" class="ghost" type="button">Choisir le lieu étudié</button>
+                <button id="catch-fit" class="ghost" type="button" disabled>Cadrer</button>
                 <button id="catch-clear" class="ghost" type="button" disabled>Effacer</button>
               </div>
+              <ul id="catch-list" class="catch-list"></ul>
               <p id="catch-info" class="hint"></p>
             </div>
             <label>Résolution

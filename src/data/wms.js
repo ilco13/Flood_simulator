@@ -169,24 +169,30 @@ export async function fetchRgbaGrid(grid, layer, fallbackLayer, { onProgress, on
     }
     let holes = 0;
     for (let k = 3; k < px.length; k += 4) if (px[k] < 128) holes++;
-    if (holes > 0 && fallbackLayer) {
+    // Trous (zone non couverte par ce millésime) : millésimes précédents, dans l'ordre.
+    const fallbacks = Array.isArray(fallbackLayer) ? fallbackLayer : fallbackLayer ? [fallbackLayer] : [];
+    for (const fbLayer of fallbacks) {
+      if (!holes) break;
       let fb = null;
       try {
-        fb = await load(fallbackLayer, 5);
+        fb = await load(fbLayer, 4);
       } catch (e) {
         if (signal?.aborted) throw e;
-        console.warn(`${fallbackLayer} indisponible`, e);
-        warnings?.push('occupation du sol incomplète (classe « autre » utilisée)');
+        console.warn(`${fbLayer} indisponible`, e);
+        continue;
       }
-      for (let k = 0; fb && k < px.length; k += 4) {
+      holes = 0;
+      for (let k = 0; k < px.length; k += 4) {
         if (px[k + 3] < 128) {
           px[k] = fb[k];
           px[k + 1] = fb[k + 1];
           px[k + 2] = fb[k + 2];
           px[k + 3] = fb[k + 3];
+          if (fb[k + 3] < 128) holes++;
         }
       }
     }
+    if (holes > 0) warnings?.push('occupation du sol incomplète (classe « autre » utilisée)');
     for (let r = 0; r < b.h; r++) {
       out.set(px.subarray(r * b.w * 4, (r + 1) * b.w * 4), ((b.j0 + r) * grid.nx + b.i0) * 4);
     }

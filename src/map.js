@@ -101,21 +101,30 @@ export async function createMap(container) {
         type: 'fill',
         source: 'catchment',
         filter: ['==', ['geometry-type'], 'Polygon'],
-        paint: { 'fill-color': '#ff9f1c', 'fill-opacity': 0.12 },
+        paint: { 'fill-color': ['case', ['==', ['get', 'on'], 1], '#ff9f1c', '#9aa5b1'], 'fill-opacity': ['case', ['==', ['get', 'on'], 1], 0.14, 0.05] },
       },
       {
         id: 'catchment-line',
         type: 'line',
         source: 'catchment',
         filter: ['==', ['geometry-type'], 'Polygon'],
-        paint: { 'line-color': '#ff9f1c', 'line-width': 2.5, 'line-dasharray': [2, 1.5] },
+        paint: {
+          'line-color': ['case', ['==', ['get', 'on'], 1], '#ff9f1c', '#c3cbd3'],
+          'line-width': ['case', ['==', ['get', 'on'], 1], 2.5, 1.2],
+          'line-dasharray': [2, 1.5],
+        },
       },
       {
         id: 'catchment-point',
         type: 'circle',
         source: 'catchment',
         filter: ['==', ['geometry-type'], 'Point'],
-        paint: { 'circle-radius': 6, 'circle-color': '#ff9f1c', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 },
+        paint: {
+          'circle-radius': ['case', ['has', 'house'], 8, 5],
+          'circle-color': ['case', ['has', 'house'], '#d6363b', ['==', ['get', 'on'], 1], '#ff9f1c', '#9aa5b1'],
+          'circle-stroke-color': '#fff',
+          'circle-stroke-width': 2,
+        },
       },
       ...(overlay?.layers || []),
       {

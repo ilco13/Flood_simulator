@@ -74,7 +74,10 @@ self.onmessage = async (e) => {
 
     step('prep', 0.4);
     const terrain = prepareTerrain({ grid, dem, rivers, burnDepth, outlet, upstreamOf });
-    const gauges = buildGauges(grid, rivers, gaugeDefs);
+    // Points de suivi : seulement ceux qui coupent le bassin simulé.
+    const gauges = buildGauges(grid, rivers, gaugeDefs).filter(
+      (g) => !terrain.mask || Array.from(g.cells).some((k) => terrain.mask[k] || terrain.mask[k + 1] || terrain.mask[k + grid.nx]),
+    );
 
     const outline = terrain.mask ? outlineWgs(terrain.mask, grid) : [];
     step('prep', 0.9);

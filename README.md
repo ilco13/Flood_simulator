@@ -1,6 +1,6 @@
-# Crue de l'Arc : simulateur d'inondation
+# Simulateur de crue (France entière)
 
-Application web qui simule la montée des eaux dans la **haute vallée de l'Arc** (Bouches-du-Rhône) pour une pluie donnée (par exemple 100 mm en 24 h). La pluie tombe sur le relief **LiDAR HD de l'IGN**, ruisselle selon l'occupation du sol, puis s'écoule en 2D dans l'Arc et ses vallats (Verdalaï, Longarel, Bayeux, Cause…). La hauteur d'eau s'affiche heure par heure en bleu transparent sur la photo aérienne, avec les routes et les noms de lieux.
+Application web qui simule la montée des eaux **autour d'un lieu choisi n'importe où en France métropolitaine** pour une pluie donnée (par exemple 100 mm en 24 h). Elle repère les cours d'eau qui peuvent atteindre le lieu, délimite leurs bassins versants, puis fait tomber la pluie sur le relief **LiDAR HD de l'IGN** : l'eau ruisselle selon l'occupation du sol et s'écoule en 2D dans les cours d'eau. Un préréglage couvre la haute vallée de l'Arc (Bouches-du-Rhône), point de départ du projet. La hauteur d'eau s'affiche heure par heure en bleu transparent sur la photo aérienne, avec les routes et les noms de lieux.
 
 > ⚠️ Outil pédagogique et exploratoire. Il ne remplace ni le PPRI, ni Vigicrues, ni les consignes des autorités.
 
@@ -11,9 +11,9 @@ Le champ en haut du panneau cherche un lieu, une adresse ou un cours d'eau (géo
 1. Saisir le **cumul de pluie** (mm) et la **durée** (h), puis choisir la répartition dans le temps.
 2. Choisir l'**humidité du sol** avant l'épisode (sec, normal ou saturé) et le type de sol.
 3. Choisir la **zone** :
-   - *Haute vallée de l'Arc* : tout le bassin, de Pourrières à Aix (Pont de l'Arc), à 50, 25, 15, 10 ou 5 m ;
-   - *Zone affichée* : la portion visible de la carte, en détail fin (jusqu'à 1 m). L'eau venant de l'amont hors écran n'y est pas comptée. Pour savoir jusqu'où dézoomer, **« Choisir le point étudié »** puis un clic dans le lit du cours d'eau : l'application trace tout le **bassin versant amont** de ce point (contour orange, surface en km²), indique quelle part en couvre la zone affichée, et **« Cadrer sur son bassin »** ajuste la carte (et la maille si besoin). La simulation ajoute alors un point de suivi « Point étudié ».
-   - La pluie ne tombe que sur les terrains qui s'écoulent vers l'exutoire : l'Arc à Aix en bassin entier, le point étudié en zone affichée (toute la zone si aucun point n'est choisi).
+   - *Bassins versants du lieu étudié* (par défaut) : rechercher un lieu ou cliquer « Choisir le lieu étudié » puis sur la carte. L'application liste les cours d'eau à moins de 600 m (BD TOPO), avec pour chacun la distance, le **dénivelé entre le lieu et le lit** et la surface de son **bassin versant amont**, plus le ruissellement du versant qui domine le lieu. Elle coche ceux dont un débordement peut atteindre le lieu (dénivelé inférieur à une tolérance qui croît avec la taille du bassin) ; on peut cocher ou décocher. La simulation porte sur l'union des bassins cochés, à la maille la plus fine que l'appareil calcule en une dizaine de minutes, avec un point de suivi du débit au droit du lieu pour chaque cours d'eau. Les très grands bassins (> 2 000 km², ex. Rhône, Loire) relèvent d'un modèle fluvial et ne sont pas proposés ;
+   - *Zone affichée* : la portion visible de la carte, en détail fin (jusqu'à 1 m), pluie sur toute la zone. L'eau venant de l'amont hors écran n'y est pas comptée ;
+   - *Préréglage haute vallée de l'Arc* : tout le bassin, de Pourrières à Aix (Pont de l'Arc), à 50, 25, 15, 10 ou 5 m.
 4. **Lancer la simulation**. L'eau apparaît au fil du calcul.
 5. Explorer les résultats :
    - curseur temporel et lecture animée ;
@@ -32,7 +32,7 @@ Le calcul tourne **dans le navigateur**, sur la carte graphique (WebGPU) quand e
 | Donnée | Couche | Usage |
 |---|---|---|
 | Relief | `IGNF_LIDAR-HD_MNT_ELEVATION.ELEVATIONGRIDCOVERAGE.LAMB93` (MNT LiDAR HD 0,5 m), avec repli sur RGE ALTI 1 m (`RGEALTI-MNT_PYR-ZIP_FXX_LAMB93_WMS`) | altitude du terrain (float32 via WMS-R) |
-| Occupation du sol | `IGNF_COSIA_2024-2026` (IA, 20 cm) | coefficient de ruissellement (CN) et rugosité (Manning) |
+| Occupation du sol | `IGNF_COSIA_2024-2026` (IA, 20 cm), complété par les millésimes 2021-2023 puis 2017-2020 | coefficient de ruissellement (CN) et rugosité (Manning) |
 | Cours d'eau | `BDTOPO_V3:troncon_hydrographique` (WFS) | gravure des vallats dans le relief, points de suivi, affichage |
 | Fond de carte | BD ORTHO (WMTS) + Plan IGN vectoriel (routes, noms) | vue « hybride » |
 
@@ -78,6 +78,8 @@ Le workflow `.github/workflows/deploy.yml` publie `dist/` sur **GitHub Pages** �
 - Les ouvrages ne sont représentés que par le relief et la gravure BD TOPO : buses sous-dimensionnées, bassins de rétention, clapets, digues, etc.
 - Le schéma « inertie locale » néglige l'accélération convective. Il est adapté aux plaines d'inondation, moins aux écoulements torrentiels très rapides.
 - Le modèle n'est pas encore calé sur des crues observées (Hydroportail, PPRI de l'Arc).
+- La forme du hyétogramme Chicago utilise le coefficient de Montana b d'Aix-en-Provence ; ailleurs, c'est une approximation (le cumul reste celui saisi).
+- Les crues des grands fleuves (débit venu de très loin à l'amont) ne sont pas simulées.
 
 ## Pistes suivantes
 

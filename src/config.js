@@ -22,7 +22,7 @@ export const LAYERS = {
   demFallback: 'RGEALTI-MNT_PYR-ZIP_FXX_LAMB93_WMS', // RGE ALTI 1 m
   landcover: 'IGNF_COSIA_2024-2026', // Occupation du sol IA IGN (20 cm)
   // Millésime précédent : complète les zones pas encore couvertes (ex. partie varoise).
-  landcoverFallback: 'IGNF_COSIA_2021-2023',
+  landcoverFallback: ['IGNF_COSIA_2021-2023', 'IGNF_COSIA_2017-2020'],
   rivers: 'BDTOPO_V3:troncon_hydrographique',
 };
 

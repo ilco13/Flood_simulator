@@ -79,6 +79,40 @@ export function nearestRiverPoint(rivers, x, y, maxDist) {
   return best;
 }
 
+/**
+ * Cours d'eau proches d'un point : pour chaque cours d'eau nommé (et pour le tronçon sans
+ * nom le plus proche), le point de son tracé le plus proche. Triés par distance.
+ */
+export function riverCandidates(rivers, x, y, maxDist, max = 5) {
+  const best = new Map();
+  for (const f of rivers.features) {
+    // Les rivières larges sont représentées par un axe « fictif » dans leur surface en eau :
+    // on les garde ici (mais pas pour la gravure du relief).
+    const pr = f.properties;
+    const natural = pr.nature === 'Ecoulement naturel' || pr.nature === 'Ecoulement canalisé';
+    if (pr.underground || !(isBurnable(f) || (pr.fictif && natural && pr.name))) continue;
+    if (pr.name && /canal/i.test(pr.name)) continue;
+    const key = pr.name || '';
+    for (const part of lineParts(f.geometry)) {
+      for (let s = 0; s < part.length - 1; s++) {
+        const [x0, y0] = part[s];
+        const [x1, y1] = part[s + 1];
+        const vx = x1 - x0;
+        const vy = y1 - y0;
+        const L2 = vx * vx + vy * vy;
+        const t = L2 ? Math.max(0, Math.min(1, ((x - x0) * vx + (y - y0) * vy) / L2)) : 0;
+        const px = x0 + t * vx;
+        const py = y0 + t * vy;
+        const d = Math.hypot(px - x, py - y);
+        if (d > maxDist) continue;
+        const cur = best.get(key);
+        if (!cur || d < cur.d) best.set(key, { d, x: px, y: py, name: f.properties.name || null });
+      }
+    }
+  }
+  return [...best.values()].sort((a, b) => a.d - b.d).slice(0, max);
+}
+
 function lineParts(geom) {
   if (geom.type === 'LineString') return [geom.coordinates];
   if (geom.type === 'MultiLineString') return geom.coordinates;
