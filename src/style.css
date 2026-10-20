@@ -389,3 +389,13 @@ button.icon {
     bottom: 76px;
   }
 }
+
+/* Bouton 3D de la carte */
+.maplibregl-ctrl button.ctrl-3d {
+  font: 700 12px system-ui, sans-serif;
+  color: #13202e;
+}
+.maplibregl-ctrl.maplibregl-ctrl-group button.ctrl-3d.on {
+  background-color: #1f6fe0 !important;
+  color: #fff;
+}

@@ -161,9 +161,9 @@ export function setWaterCanvas(map, canvas, corners) {
       id: 'water',
       type: 'raster',
       source: 'water',
-      paint: { 'raster-opacity': 1, 'raster-resampling': 'nearest', 'raster-fade-duration': 0 },
+      paint: { 'raster-opacity': map.getTerrain() ? 0.45 : 1, 'raster-resampling': 'nearest', 'raster-fade-duration': 0 },
     },
-    'rivers',
+    map.getLayer('water3d') ? 'water3d' : 'rivers',
   );
 }
 

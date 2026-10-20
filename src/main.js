@@ -11,6 +11,8 @@ import { WaterCanvas, buildLut, LEGEND } from './render/water.js';
 import { drawChart } from './ui/chart.js';
 import { cacheClear } from './data/cache.js';
 import { stableDt } from './sim/scheme.js';
+import { setTerrain3d, setExaggeration, Toggle3dControl } from './terrain3d.js';
+import { Water3DLayer } from './render/water3d.js';
 
 const $ = (id) => document.getElementById(id);
 const GPU_CELL_CAP = 16e6;
@@ -238,7 +240,13 @@ function setupUi() {
     state.threshold = Number($('thr').value) / 100;
     $('thr-label').textContent = `${$('thr').value} cm`;
     state.lut = buildLut(state.threshold);
+    state.water3d?.setThreshold(state.threshold);
     renderCurrent();
+  });
+  $('relief3d').addEventListener('change', () => toggle3d($('relief3d').checked));
+  $('exag').addEventListener('input', () => {
+    $('exag-label').textContent = `×${Number($('exag').value).toFixed(1)}`;
+    if (state.is3d) setExaggeration(state.map, Number($('exag').value));
   });
   $('play').onclick = togglePlay;
 
@@ -272,7 +280,7 @@ function setLayerVisible(name, on) {
           ? ['rivers']
           : name === 'shadow'
             ? ['shadow']
-            : ['water'];
+            : ['water', 'water3d'];
   for (const id of ids) if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
 }
 
@@ -389,6 +397,9 @@ async function startRun() {
     run.water = new WaterCanvas(grid.nx, grid.ny);
     setWaterCanvas(state.map, run.water.canvas, gridCornersWgs(grid));
     setLayerVisible('water', document.querySelector('[data-layer=water]').checked);
+    state.water3dGrid = null;
+    state.lastQ = null;
+    if (state.is3d) ensureWater3d();
 
     const hyeto = hyetoOf(p);
     const totalTime = (p.rainH + p.tailH) * 3600;
@@ -539,6 +550,11 @@ function drawQuantized(q, t) {
   if (!run?.water) return;
   run.water.draw(q, state.lut);
   refreshWater(state.map);
+  state.lastQ = q;
+  if (state.is3d) {
+    ensureWater3d();
+    state.water3d.setDepth(q);
+  }
   $('time-label').textContent = t == null ? 'max' : fmtH(t);
   state.cursorT = t;
   drawHydro();
@@ -680,6 +696,30 @@ async function probeAt(lngLat) {
   }
 }
 
+/* ---------- Vue 3D ---------- */
+
+/** (Re)construit le maillage de la nappe 3D pour la simulation courante. */
+function ensureWater3d() {
+  const run = state.run;
+  if (!run?.grid || !state.data?.dem || state.water3dGrid === run.grid) return;
+  state.water3d.setGrid(run.grid, state.data.dem);
+  state.water3dGrid = run.grid;
+  if (state.lastQ) state.water3d.setDepth(state.lastQ);
+}
+
+function toggle3d(on) {
+  state.is3d = on;
+  $('relief3d').checked = on;
+  state.ctrl3d.set(on);
+  setTerrain3d(state.map, on, Number($('exag').value));
+  // En 3D, la couche drapée s'efface au profit de la nappe en volume.
+  if (state.map.getLayer('water')) state.map.setPaintProperty('water', 'raster-opacity', on ? 0.45 : 1);
+  if (on) {
+    ensureWater3d();
+    if (state.lastQ) state.water3d.setDepth(state.lastQ);
+  }
+}
+
 /* ---------- Démarrage ---------- */
 
 async function main() {
@@ -697,6 +737,13 @@ async function main() {
     if (params().zone === 'view') describeRes();
   });
   state.map.on('click', (e) => probeAt(e.lngLat));
+  // Accès à l'état depuis la console du navigateur (diagnostic).
+  window.floodApp = state;
+  state.water3d = new Water3DLayer();
+  state.water3d.setThreshold(state.threshold);
+  state.map.addLayer(state.water3d, 'rivers');
+  state.ctrl3d = new Toggle3dControl((on) => toggle3d(on));
+  state.map.addControl(state.ctrl3d, 'top-right');
   if (gpu) {
     gpu.device.lost.then((info) => {
       state.gpu = null;

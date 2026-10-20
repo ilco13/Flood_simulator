@@ -16,7 +16,8 @@ Application web qui simule la montée des eaux dans la **haute vallée de l'Arc*
    - curseur temporel et lecture animée ;
    - vue « maximum atteint » ;
    - débits aux points de suivi (Arc à Trets, Rousset, Châteauneuf, Meyreuil, Aix ; Verdalaï, Longarel, Bayeux, Cause) ;
-   - en touchant la carte : hauteur d'eau, maximum, heure du pic et vitesse en ce point.
+   - en touchant la carte : hauteur d'eau, maximum, heure du pic et vitesse en ce point ;
+   - **vue 3D** (bouton « 3D » de la carte ou case « Relief 3D ») : relief LiDAR HD en relief, photo aérienne drapée, et nappe d'eau en volume posée à la cote « sol + hauteur d'eau », animée avec le curseur de temps. Exagération du relief réglable (×1 à ×4).
 
 Le calcul tourne **dans le navigateur**, sur la carte graphique (WebGPU) quand elle est disponible, sinon sur le processeur, plus lentement et à une résolution plus grossière. Aucun serveur de calcul n'est nécessaire. Les données IGN sont chargées à la demande, puis gardées en cache dans le navigateur.
 
@@ -56,7 +57,8 @@ Autres outils de test :
 - `node test/local-run.mjs <dossier> <res> <mm> <h> <forme> <amc> <après h> <sortie>` : simulation fine d'un petit secteur autour d'un point (débit dans le vallat, hauteur d'eau au point) ;
 - `node test/real-run.mjs <dossier> <res>` : simulation complète hors navigateur sur des données IGN téléchargées (MNT `.bil`, COSIA `.rgba`, BD TOPO `.json`) ;
 - `node test/gpu-vs-cpu.cjs` : compare les solveurs GPU et CPU dans Chromium (Playwright, avec le serveur de développement lancé) ;
-- `node test/e2e.cjs <url> <dossier>` : parcours complet dans le navigateur, avec captures d'écran.
+- `node test/e2e.cjs <url> <dossier>` : parcours complet dans le navigateur, avec captures d'écran ;
+- `node test/e2e-3d.cjs <url> <dossier> …` : simulation puis captures de la vue 3D.
 
 ## Déploiement
 
@@ -75,4 +77,4 @@ Le workflow `.github/workflows/deploy.yml` publie `dist/` sur **GitHub Pages** �
 - Calage sur les stations Hydroportail de l'Arc et comparaison avec les emprises du PPRI / AZI.
 - Pluie spatialisée (lames d'eau radar Météo-France), scénarios de crues historiques.
 - Carte d'aléa (hauteur × vitesse), routes coupées, bâtiments touchés.
-- Relief en 3D, export GeoTIFF des hauteurs maximales.
+- Export GeoTIFF des hauteurs maximales.
