@@ -228,7 +228,20 @@ export async function createMap(container) {
   map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
   map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-right');
   map.addControl(new maplibregl.GeolocateControl({ trackUserLocation: false }), 'top-right');
-  await new Promise((r) => (map.loaded() ? r() : map.once('load', r)));
+  // « load » attend toutes les tuiles visibles : une tuile IGN bloquée empêcherait le
+  // démarrage. Le style suffit pour ajouter nos couches : on n'attend pas plus de 6 s.
+  await new Promise((resolve) => {
+    if (map.loaded()) return resolve();
+    const t0 = performance.now();
+    const timer = setInterval(() => {
+      if (map.isStyleLoaded() && performance.now() - t0 > 6000) done();
+    }, 300);
+    const done = () => {
+      clearInterval(timer);
+      resolve();
+    };
+    map.once('load', done);
+  });
   return { map, overlayIds: (overlay?.layers || []).map((l) => l.id) };
 }
 
