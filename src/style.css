@@ -591,7 +591,7 @@ button.icon {
   cursor: default;
 }
 .chart.section {
-  height: 260px;
+  height: 240px;
   border-radius: 8px;
   cursor: crosshair;
   touch-action: none;
@@ -609,4 +609,133 @@ button.icon {
 .legend i.sw-soil {
   background: #b48a5c;
   border-top: 3px solid #5f8f3a;
+}
+
+/* Panneau de coupe flottant sur la carte */
+#section-dock {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 34px;
+  max-width: 980px;
+  margin: 0 auto;
+  z-index: 4;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 8px 10px 10px;
+}
+.dock-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dock-head input[type='range'] {
+  flex: 1;
+  min-width: 60px;
+}
+.dock-title {
+  font-size: 13px;
+}
+#dock-time-label {
+  min-width: 56px;
+  text-align: right;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+button.icon.sm {
+  width: 30px;
+  height: 30px;
+  font-size: 12px;
+}
+.chip-btn,
+.icon-ghost {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  border-radius: 7px;
+  padding: 3px 8px;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.chip-btn.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+.dock-body {
+  display: flex;
+  gap: 12px;
+  margin-top: 8px;
+}
+.dock-body .chart.section {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+.dock-side {
+  width: 220px;
+  flex: none;
+}
+.dock-side label {
+  margin-top: 0;
+}
+.dock-side .hint {
+  min-height: 3.6em;
+}
+#section-dock.min .dock-body {
+  display: none;
+}
+@media (max-width: 760px) {
+  #section-dock {
+    top: 56px;
+    bottom: auto;
+    left: 8px;
+    right: 8px;
+    padding: 6px 8px 8px;
+  }
+  .dock-body {
+    flex-direction: column;
+    gap: 4px;
+  }
+  .dock-body .chart.section {
+    height: 170px;
+    flex: none;
+  }
+  .dock-side {
+    width: auto;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0 10px;
+  }
+  .dock-side .hint {
+    grid-column: 1 / -1;
+    min-height: 0;
+    margin: 2px 0;
+  }
+  .dock-side .legend {
+    display: none;
+  }
+}
+
+/* Bulle de survol de la carte */
+#map-tip {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  background: rgba(11, 37, 64, 0.92);
+  color: #fff;
+  font-size: 12.5px;
+  line-height: 1.35;
+  padding: 6px 9px;
+  border-radius: 8px;
+  white-space: nowrap;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+  transform: translate(14px, 14px);
+}
+#map-tip b {
+  font-size: 14px;
 }

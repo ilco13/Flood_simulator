@@ -718,6 +718,7 @@ function drawQuantized(q, t) {
     state.water3d.setDepth(q);
   }
   $('time-label').textContent = t == null ? 'max' : fmtH(t);
+  syncDock();
   state.cursorT = t;
   drawHydro();
 }
@@ -789,6 +790,7 @@ function togglePlay() {
   }
   if (Number($('time').value) >= Number($('time').max)) $('time').value = 0;
   $('play').textContent = '❚❚';
+  syncDock();
   let busy = false;
   playTimer = setInterval(async () => {
     if (busy) return;
@@ -808,6 +810,7 @@ function stopPlay() {
   clearInterval(playTimer);
   playTimer = null;
   $('play').textContent = '▶';
+  syncDock();
 }
 
 /* ---------- Sonde (clic sur la carte) ---------- */
@@ -858,6 +861,47 @@ async function probeAt(lngLat) {
   }
 }
 
+/* ---------- Bulle de survol : hauteur d'eau sous la souris ---------- */
+
+function setupMapTip() {
+  const tip = $('map-tip');
+  let pending = null;
+  const fmtD = (h) => (h < 1 ? `${Math.round(h * 100)} cm` : `${h.toFixed(2).replace('.', ',')} m`);
+  const show = () => {
+    const e = pending;
+    pending = null;
+    const run = state.run;
+    if (!e || !run?.grid || !state.lastQ) return (tip.hidden = true);
+    const [x, y] = toL93(e.lngLat.lng, e.lngLat.lat);
+    const c = cellOf(run.grid, x, y);
+    if (!c) return (tip.hidden = true);
+    const h = dequantize(state.lastQ[c.k]);
+    const hm = run.maxima ? run.maxima.hmax[c.k] : 0;
+    if (h < state.threshold && hm < state.threshold) return (tip.hidden = true);
+    const when = state.viewMode === 'max' ? 'maximum atteint' : `à ${$('time-label').textContent}`;
+    let html = h >= 0.01 ? `<b>${fmtD(h)}</b> d'eau ${when}` : `Pas d'eau ${when}`;
+    if (run.maxima && state.viewMode !== 'max' && hm >= 0.01) html += `<br>max ${fmtD(hm)} à ${fmtH(run.maxima.tmax[c.k])}`;
+    else if (run.maxima && state.viewMode === 'max' && hm >= 0.01) html += `<br>atteint à ${fmtH(run.maxima.tmax[c.k])}`;
+    tip.innerHTML = html;
+    // Bulle placée près du curseur, en restant dans la carte
+    const box = state.map.getContainer().getBoundingClientRect();
+    const px = Math.min(e.point.x, box.width - 190);
+    const py = Math.min(e.point.y, box.height - 60);
+    tip.style.left = `${px}px`;
+    tip.style.top = `${py}px`;
+    tip.hidden = false;
+  };
+  state.map.on('mousemove', (e) => {
+    if (!pending) requestAnimationFrame(show);
+    pending = e;
+  });
+  state.map.on('mouseout', () => {
+    pending = null;
+    tip.hidden = true;
+  });
+  state.map.on('movestart', () => (tip.hidden = true));
+}
+
 /* ---------- Coupe en travers ---------- */
 
 function setupSection() {
@@ -881,7 +925,7 @@ function setupSection() {
     state.section = null;
     setGeoJson(state.map, 'section', null);
     setGeoJson(state.map, 'section-hover', null);
-    $('section-ctrl').hidden = true;
+    $('section-dock').hidden = true;
     $('section-auto').disabled = true;
     $('section-clear').disabled = true;
   };
@@ -894,6 +938,18 @@ function setupSection() {
     if (!state.section) return;
     state.section.width = Number($('sec-width').value);
     updateSection();
+  });
+  $('dock-close').onclick = () => $('section-clear').click();
+  $('dock-min').onclick = () => {
+    const min = $('section-dock').classList.toggle('min');
+    $('dock-min').textContent = min ? '▴' : '▾';
+    if (!min) redrawSection(false);
+  };
+  $('dock-play').onclick = () => togglePlay();
+  $('dock-max').onclick = () => $('view-mode').querySelector('button[data-v="max"]').click();
+  $('dock-time').addEventListener('input', () => {
+    $('time').value = $('dock-time').value;
+    $('time').dispatchEvent(new Event('input'));
   });
   const cv = $('section-canvas');
   const hover = (clientX) => {
@@ -928,6 +984,17 @@ function setupSection() {
   window.addEventListener('resize', () => redrawSection(false));
 }
 
+/** Recopie l'état du curseur de temps principal dans le panneau de coupe. */
+function syncDock() {
+  if (!$('section-dock') || $('section-dock').hidden) return;
+  $('dock-time').max = $('time').max;
+  $('dock-time').value = $('time').value;
+  const isMax = state.viewMode === 'max';
+  $('dock-time-label').textContent = isMax ? 'max' : $('time-label').textContent;
+  $('dock-max').classList.toggle('on', isMax);
+  $('dock-play').textContent = $('play').textContent;
+}
+
 function placeSection(lngLat) {
   state.sectionMode = false;
   $('section-place').classList.remove('on');
@@ -941,13 +1008,14 @@ function placeSection(lngLat) {
     state.section.angle = autoOrientation(state.run?.grid || state.data.grid, state.data.z || state.data.dem, cx, cy, width);
     $('sec-angle').value = state.section.angle;
   }
-  $('section-ctrl').hidden = false;
+  $('section-dock').hidden = false;
+  $('section-dock').classList.remove('min');
+  syncDock();
   $('section-auto').disabled = false;
   $('section-clear').disabled = false;
-  $('section-hint').textContent = 'Réglez l\'orientation et la largeur ; la coupe suit le curseur de temps.';
-  if (window.matchMedia('(max-width: 760px)').matches) $('panel').classList.remove('collapsed');
+  $('section-hint').textContent =
+    'La coupe s\'affiche en bas de la carte : réglez son orientation, sa largeur et l\'heure directement dessus.';
   updateSection();
-  $('section-ctrl').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
 let fineTimer = null;
@@ -1252,6 +1320,7 @@ async function main() {
     if (state.sectionMode) placeSection(e.lngLat);
     else probeAt(e.lngLat);
   });
+  setupMapTip();
   // Accès à l'état depuis la console du navigateur (diagnostic).
   window.floodApp = state;
   state.water3d = new Water3DLayer();
