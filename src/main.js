@@ -514,6 +514,8 @@ async function startRun() {
     maxQ: null,
     t0: performance.now(),
   };
+  // Nom du lieu, cherché pendant le calcul (pour nommer l'enregistrement).
+  run.placeP = findPlaceName(grid, p).catch(() => null);
   state.run = run;
   $('run').textContent = 'Arrêter';
   $('run').classList.add('stop');
@@ -1087,9 +1089,74 @@ const fmtShort = (v) => String(+Number(v).toFixed(2)).replace('.', ',');
 let resolveMapReady;
 const mapReady = new Promise((r) => (resolveMapReady = r));
 
-function runName(p, partial) {
-  const zone = p.zone === 'basin' ? 'bassin' : 'zone';
-  return `${fmtShort(p.rainMm)} mm en ${fmtShort(p.rainH)} h · ${AMC_LABEL[p.amc]} · ${zone} ${p.res} m${partial ? ' (partielle)' : ''}`;
+function runName(p, partial, place) {
+  const where = place || (p.zone === 'basin' ? 'Haute vallée de l\'Arc' : 'Zone affichée');
+  return `${where} · ${fmtShort(p.rainMm)} mm en ${fmtShort(p.rainH)} h · ${AMC_LABEL[p.amc]} · ${p.res} m${partial ? ' (partielle)' : ''}`;
+}
+
+/**
+ * Nom lisible du lieu simulé : « Haute vallée de l'Arc » pour le bassin entier, sinon le
+ * lieu-dit le plus proche du centre (tuiles Plan IGN déjà chargées) et la commune
+ * (géocodage inverse IGN, sans numéro de rue).
+ */
+async function findPlaceName(grid, p) {
+  if (p.zone === 'basin') return 'Haute vallée de l\'Arc';
+  const [lon, lat] = toWgs(grid.xmin + (grid.nx * grid.dx) / 2, grid.ymax - (grid.ny * grid.dx) / 2);
+  const toM = (a, b) => {
+    const dx = (a[0] - b[0]) * 111320 * Math.cos((lat * Math.PI) / 180);
+    const dy = (a[1] - b[1]) * 110540;
+    return Math.hypot(dx, dy);
+  };
+  // Lieu-dit le plus proche (dans un rayon de la demi-zone, 2 km au plus)
+  let locality = null;
+  try {
+    const radius = Math.min(2000, (Math.max(grid.nx, grid.ny) * grid.dx) / 2 + 200);
+    let best = Infinity;
+    // Poids : une commune proche l'emporte, puis les lieux-dits bien visibles sur la carte
+    // (typographie A), puis les petits lieux-dits ; résidences et monuments en dernier recours.
+    const weight = (pr) => {
+      const symbo = String(pr.symbo || '');
+      const typo = String(pr.txt_typo || '');
+      if (symbo.startsWith('COMMUNE')) return 0.3;
+      if (symbo.startsWith('LIEU-DIT')) return typo.startsWith('TYPO_A') ? 0.5 : 1;
+      return 4;
+    };
+    for (const f of state.map.querySourceFeatures('plan_ign', { sourceLayer: 'toponyme_localite_ponc' })) {
+      const name = f.properties?.texte;
+      if (!name || f.geometry.type !== 'Point') continue;
+      const d = toM(f.geometry.coordinates, [lon, lat]);
+      if (d > radius) continue;
+      const score = d * weight(f.properties);
+      if (score < best) {
+        best = score;
+        locality = name;
+      }
+    }
+  } catch {
+    // tuiles indisponibles : on se contente de la commune
+  }
+  let city = null;
+  try {
+    const res = await fetchWithTimeout(
+      `https://data.geopf.fr/geocodage/reverse?lon=${lon}&lat=${lat}&index=address&limit=1`,
+      6000,
+    );
+    city = (await res.json()).features?.[0]?.properties?.city || null;
+  } catch {
+    // hors ligne
+  }
+  if (locality && city && locality.toLowerCase() !== city.toLowerCase()) return `${locality} (${city})`;
+  return locality || city || null;
+}
+
+async function fetchWithTimeout(url, ms) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fetch(url, { signal: ctrl.signal });
+  } finally {
+    clearTimeout(t);
+  }
 }
 
 async function autoSave(run, partial) {
@@ -1104,7 +1171,7 @@ async function autoSave(run, partial) {
   note.textContent = 'Enregistrement de la simulation…';
   try {
     const rec = await packRun({
-      name: runName(run.params, partial),
+      name: runName(run.params, partial, await Promise.race([run.placeP, new Promise((r) => setTimeout(() => r(null), 5000))])),
       params: run.params,
       grid: run.grid,
       totalTime: run.totalTime,
