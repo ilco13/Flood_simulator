@@ -21,13 +21,22 @@ const post = (type, data, transfer) => self.postMessage({ type, ...data }, trans
 self.onmessage = async (e) => {
   const { grid, burnDepth, outlet, gauges: gaugeDefs } = e.data;
   try {
-    const step = (label, p) => post('progress', { label, p });
+    const last = {};
+    const step = (key, p, detail) => {
+      last[key] = p;
+      post('progress', { step: key, p, detail });
+    };
+    const retry = (key) => (attempt, tries) =>
+      step(key, last[key] ?? 0, `serveur IGN lent, nouvel essai ${attempt}/${tries}`);
     const warnings = [];
     const N = grid.nx * grid.ny;
 
-    step('Relief LiDAR HD (IGN)…', 0);
+    step('dem', 0);
+    step('lc', 0);
+    step('rivers', 0);
     const demP = fetchFloatGrid(grid, LAYERS.dem, LAYERS.demFallback, {
-      onProgress: (p) => step('Relief LiDAR HD (IGN)…', p),
+      onProgress: (p) => step('dem', p),
+      onRetry: retry('dem'),
       warnings,
     });
     // Occupation du sol sur-échantillonnée (f×f pixels par maille) pour ne pas perdre
@@ -35,7 +44,8 @@ self.onmessage = async (e) => {
     const f = landcoverOversampling(grid.dx);
     const subGrid = { ...grid, dx: grid.dx / f, nx: grid.nx * f, ny: grid.ny * f };
     const lcP = fetchRgbaGrid(subGrid, LAYERS.landcover, LAYERS.landcoverFallback, {
-      onProgress: (p) => step('Occupation du sol COSIA (IGN)…', p),
+      onProgress: (p) => step('lc', p),
+      onRetry: retry('lc'),
       warnings,
     });
     const bboxPad = {
@@ -44,19 +54,25 @@ self.onmessage = async (e) => {
       xmax: grid.xmax + 500,
       ymax: grid.ymax + 500,
     };
-    const rivP = fetchRivers(bboxPad).catch((err) => {
+    const rivP = fetchRivers(bboxPad)
+      .then((r) => {
+        step('rivers', 1);
+        return r;
+      })
+      .catch((err) => {
       console.warn('BD TOPO indisponible', err);
       warnings.push('réseau BD TOPO indisponible (pas de gravure ni de points de suivi)');
+      step('rivers', 1);
       return { type: 'FeatureCollection', features: [] };
     });
     const [dem, rgba, rivers] = await Promise.all([demP, lcP, rivP]);
 
-    step('Classification de l\'occupation du sol…', 1);
+    step('prep', 0.1);
     const sub = classifyRgba(rgba, N * f * f);
     const fractions = classFractions(sub);
     const classes = regroupSamples(sub, grid, f);
 
-    step('Gravure des cours d\'eau et délimitation du bassin…', 1);
+    step('prep', 0.4);
     const terrain = prepareTerrain({ grid, dem, rivers, burnDepth, outlet });
     const gauges = buildGauges(grid, rivers, gaugeDefs);
 
@@ -76,6 +92,7 @@ self.onmessage = async (e) => {
         return out.map(([gx, gy]) => toWgs(grid.xmin + gx * grid.dx, grid.ymax - gy * grid.dx));
       });
     }
+    step('prep', 0.9);
     for (const g of gauges) g.lineWgs = g.line.map(([x, y]) => toWgs(x, y));
 
     // Réseau hydrographique allégé pour l'affichage (cours d'eau nommés + permanents).

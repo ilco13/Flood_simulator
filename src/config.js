@@ -37,8 +37,9 @@ export const SHADOW_TILES =
   `${WMTS}?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ELEVATION.ELEVATIONGRIDCOVERAGE.SHADOW` +
   '&STYLE=estompage_grayscale&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png';
 
-// Taille max d'un bloc demandé au WMS (le service accepte jusqu'à 5010 px).
-export const WMS_BLOCK = 2000;
+// Taille d'un bloc demandé au WMS (le service accepte jusqu'à 5010 px). Des blocs
+// moyens donnent un avancement plus régulier et plus de requêtes en parallèle.
+export const WMS_BLOCK = 1000;
 
 // Points de suivi des débits (sections transversales perpendiculaires au cours d'eau).
 export const GAUGES = [

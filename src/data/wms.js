@@ -18,11 +18,18 @@ export function getMapUrl(layer, bbox, width, height, format) {
   return `${WMS_R}?${p}`;
 }
 
-export async function fetchWithRetry(url, { tries = 5, signal } = {}) {
+const REQUEST_TIMEOUT = 30000; // ms : au-delà, on relance la requête
+
+export async function fetchWithRetry(url, { tries = 5, signal, onRetry, timeout = REQUEST_TIMEOUT } = {}) {
   let lastErr;
   for (let a = 0; a < tries; a++) {
+    // Délai maximum par requête, combiné avec l'annulation demandée par l'appelant.
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(new Error('délai dépassé')), timeout);
+    const onAbort = () => ctrl.abort(signal.reason);
+    signal?.addEventListener('abort', onAbort, { once: true });
     try {
-      const res = await fetch(url, { signal });
+      const res = await fetch(url, { signal: ctrl.signal });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const type = res.headers.get('content-type') || '';
       if (type.includes('xml')) {
@@ -34,16 +41,21 @@ export async function fetchWithRetry(url, { tries = 5, signal } = {}) {
     } catch (e) {
       if (signal?.aborted) throw e;
       lastErr = e;
+      if (a < tries - 1) onRetry?.(a + 2, tries, e);
+      if (a === tries - 1) break;
       await new Promise((r) => setTimeout(r, Math.min(8000, 700 * 2 ** a)));
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
     }
   }
   throw lastErr;
 }
 
-async function cachedBuffer(url, signal) {
+async function cachedBuffer(url, signal, onRetry, tries = 5) {
   const hit = await cacheGet(url);
   if (hit) return hit;
-  const buf = await fetchWithRetry(url, { signal });
+  const buf = await fetchWithRetry(url, { signal, onRetry, tries });
   await cachePut(url, buf);
   return buf;
 }
@@ -87,7 +99,7 @@ async function runPool(items, limit, fn) {
  * Télécharge une couche altimétrique en float32 (BIL) sur la grille.
  * Les trous éventuels du LiDAR HD sont comblés avec la couche de secours.
  */
-export async function fetchFloatGrid(grid, layer, fallbackLayer, { onProgress, signal, warnings } = {}) {
+export async function fetchFloatGrid(grid, layer, fallbackLayer, { onProgress, onRetry, signal, warnings } = {}) {
   const out = new Float32Array(grid.nx * grid.ny);
   const blocks = blocksOf(grid);
   let done = 0;
@@ -95,20 +107,22 @@ export async function fetchFloatGrid(grid, layer, fallbackLayer, { onProgress, s
     const url = getMapUrl(layer, b.bbox, b.w, b.h, 'image/x-bil;bits=32');
     let data;
     try {
-      data = new Float32Array(await cachedBuffer(url, signal));
+      data = new Float32Array(await cachedBuffer(url, signal, onRetry));
     } catch (e) {
       if (!fallbackLayer || signal?.aborted) throw e;
       // Service momentanément indisponible : bloc entier pris sur la couche de secours.
       console.warn('MNT principal indisponible, repli', e);
       warnings?.push(`relief : bloc pris dans ${fallbackLayer}`);
-      data = new Float32Array(await cachedBuffer(getMapUrl(fallbackLayer, b.bbox, b.w, b.h, 'image/x-bil;bits=32'), signal));
+      data = new Float32Array(
+        await cachedBuffer(getMapUrl(fallbackLayer, b.bbox, b.w, b.h, 'image/x-bil;bits=32'), signal, onRetry),
+      );
     }
     if (data.length !== b.w * b.h) throw new Error('Taille de bloc MNT inattendue');
     let holes = 0;
     for (let k = 0; k < data.length; k++) if (!(data[k] > -1000)) holes++;
     if (holes > 0 && fallbackLayer) {
       const url2 = getMapUrl(fallbackLayer, b.bbox, b.w, b.h, 'image/x-bil;bits=32');
-      const fb = new Float32Array(await cachedBuffer(url2, signal));
+      const fb = new Float32Array(await cachedBuffer(url2, signal, onRetry));
       data = data.slice();
       for (let k = 0; k < data.length; k++) if (!(data[k] > -1000)) data[k] = fb[k];
     }
@@ -136,15 +150,17 @@ async function decodePng(buf, w, h) {
  * Télécharge une couche image (PNG) et renvoie les pixels RGBA sur la grille.
  * Les pixels transparents (zone non couverte) sont complétés par la couche de repli.
  */
-export async function fetchRgbaGrid(grid, layer, fallbackLayer, { onProgress, signal, warnings } = {}) {
+export async function fetchRgbaGrid(grid, layer, fallbackLayer, { onProgress, onRetry, signal, warnings } = {}) {
   const out = new Uint8ClampedArray(grid.nx * grid.ny * 4);
   const blocks = blocksOf(grid);
   let done = 0;
   await runPool(blocks, 4, async (b) => {
-    const load = async (lyr) => decodePng(await cachedBuffer(getMapUrl(lyr, b.bbox, b.w, b.h, 'image/png'), signal), b.w, b.h);
+    const load = async (lyr, tries) =>
+      decodePng(await cachedBuffer(getMapUrl(lyr, b.bbox, b.w, b.h, 'image/png'), signal, onRetry, tries), b.w, b.h);
     let px;
     try {
-      px = await load(layer);
+      // 3 essais sur le millésime récent, puis bascule sur le précédent (plus rapide que d'insister).
+      px = await load(layer, 3);
     } catch (e) {
       if (signal?.aborted) throw e;
       console.warn(`${layer} indisponible`, e);
@@ -156,7 +172,7 @@ export async function fetchRgbaGrid(grid, layer, fallbackLayer, { onProgress, si
     if (holes > 0 && fallbackLayer) {
       let fb = null;
       try {
-        fb = await load(fallbackLayer);
+        fb = await load(fallbackLayer, 5);
       } catch (e) {
         if (signal?.aborted) throw e;
         console.warn(`${fallbackLayer} indisponible`, e);

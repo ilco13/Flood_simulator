@@ -399,3 +399,117 @@ button.icon {
   background-color: #1f6fe0 !important;
   color: #fff;
 }
+
+/* Avancement détaillé */
+#progress {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--field);
+}
+.prog-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.prog-head .pct {
+  font-size: 18px;
+}
+.prog-head .elapsed {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.bar {
+  height: 8px;
+}
+#progress .status {
+  color: var(--text);
+  font-size: 13px;
+}
+#progress.error {
+  border-color: var(--danger);
+}
+#progress.error .status {
+  color: var(--danger);
+  font-weight: 600;
+}
+.steps {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  font-size: 12.5px;
+}
+.steps li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  color: var(--muted);
+}
+.steps li span {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+.steps li i {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  box-sizing: border-box;
+}
+.steps li.active {
+  color: var(--text);
+  font-weight: 600;
+}
+.steps li.active i {
+  border-color: var(--accent);
+  border-top-color: transparent;
+  animation: spin 0.9s linear infinite;
+}
+.steps li.done {
+  color: var(--text);
+}
+.steps li.done i {
+  border: 0;
+  background: #2e9e5b;
+}
+.steps li.done i::after {
+  content: '';
+}
+.steps li.skip {
+  opacity: 0.5;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* Badge d'état sur la carte (visible même panneau replié) */
+#map {
+  position: relative;
+}
+#map-status {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 3;
+  max-width: calc(100% - 80px);
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(17, 28, 40, 0.88);
+  color: #fff;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  box-shadow: var(--shadow);
+  pointer-events: none;
+}
+#map-status.error {
+  background: rgba(214, 54, 59, 0.95);
+}
+#map-status.ok {
+  background: rgba(46, 158, 91, 0.95);
+}
