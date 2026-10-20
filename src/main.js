@@ -157,6 +157,7 @@ function updateRainInfo() {
       grid: state.data.grid,
       terrain: state.data,
       classes: state.data.classes,
+      spc: state.data.spc,
       soilGroup: p.soil,
       amc: p.amc,
       rainOnBasinOnly: true,
@@ -375,6 +376,7 @@ async function startRun() {
       grid,
       terrain: data,
       classes: data.classes,
+      spc: data.spc,
       soilGroup: p.soil,
       amc: p.amc,
       rainOnBasinOnly: p.basinOnly && !!data.mask,
@@ -519,6 +521,7 @@ function finishRun(run, mass) {
     const err = mass.rain > 0 ? ((mass.rain - mass.out - mass.stored) / mass.rain) * 100 : 0;
     txt += `<br>Bilan de masse : erreur ${fmtNum(err, 3)} %.`;
   }
+  if (state.data.warnings?.length) txt += `<br><span class="warn">Données : ${state.data.warnings.join(' ; ')}.</span>`;
   $('summary').innerHTML = txt;
   const stopped = run.stop && (run.tEnd ?? run.totalTime) < run.totalTime - 1;
   setProgress(

@@ -69,14 +69,36 @@ export function buildGauges(grid, rivers, gaugeDefs) {
   return out;
 }
 
+/** Facteur de sur-échantillonnage de l'occupation du sol (pixels par côté de maille). */
+export function landcoverOversampling(dx) {
+  return Math.max(1, Math.min(4, Math.round(dx / 10)));
+}
+
+/**
+ * Réordonne une image de classes à résolution dx/f en f² échantillons consécutifs par maille.
+ */
+export function regroupSamples(sub, grid, f) {
+  if (f === 1) return sub;
+  const { nx, ny } = grid;
+  const W = nx * f;
+  const out = new Uint8Array(nx * ny * f * f);
+  let o = 0;
+  for (let j = 0; j < ny; j++)
+    for (let i = 0; i < nx; i++)
+      for (let b = 0; b < f; b++)
+        for (let a = 0; a < f; a++) out[o++] = sub[(j * f + b) * W + i * f + a];
+  return out;
+}
+
 /** Champs dépendant du scénario (sol, humidité). */
-export function buildModel({ grid, terrain, classes, soilGroup, amc, rainOnBasinOnly, cnFactor }) {
+export function buildModel({ grid, terrain, classes, spc = 1, soilGroup, amc, rainOnBasinOnly, cnFactor }) {
   const { S, manning } = buildRunoffFields(
     classes,
     rainOnBasinOnly ? terrain.mask : null,
     soilGroup,
     amc,
     cnFactor,
+    spc,
   );
   return { nx: grid.nx, ny: grid.ny, dx: grid.dx, z: terrain.z, S, manning };
 }

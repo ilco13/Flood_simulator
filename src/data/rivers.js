@@ -121,8 +121,12 @@ export function burnRivers(grid, z, rivers, depth) {
   return count;
 }
 
-/** Direction locale (vecteur unitaire, Lambert 93) du cours d'eau nommé le plus proche. */
-export function riverDirectionAt(rivers, x, y, name) {
+/**
+ * Direction moyenne (vecteur unitaire, Lambert 93) du cours d'eau nommé autour d'un point :
+ * axe principal des sommets situés à moins de `radius` m du point le plus proche du tracé.
+ * Plus robuste que le seul tronçon le plus proche dans un méandre.
+ */
+export function riverDirectionAt(rivers, x, y, name, radius = 250) {
   let best = null;
   for (const f of rivers.features) {
     if (name && f.properties.name !== name) continue;
@@ -136,12 +140,51 @@ export function riverDirectionAt(rivers, x, y, name) {
         if (L2 === 0) continue;
         const t = Math.max(0, Math.min(1, ((x - x0) * vx + (y - y0) * vy) / L2));
         const d = Math.hypot(x0 + t * vx - x, y0 + t * vy - y);
-        if (!best || d < best.d) {
-          const L = Math.sqrt(L2);
-          best = { d, ux: vx / L, uy: vy / L, px: x0 + t * vx, py: y0 + t * vy };
+        if (!best || d < best.d) best = { d, px: x0 + t * vx, py: y0 + t * vy, ux: vx, uy: vy };
+      }
+    }
+  }
+  if (!best) return null;
+  // Points du tracé proches, échantillonnés tous les ~10 m
+  const pts = [];
+  for (const f of rivers.features) {
+    if (name && f.properties.name !== name) continue;
+    for (const part of lineParts(f.geometry)) {
+      for (let s = 0; s < part.length - 1; s++) {
+        const [x0, y0] = part[s];
+        const [x1, y1] = part[s + 1];
+        const n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / 10));
+        for (let k = 0; k < n; k++) {
+          const px = x0 + ((x1 - x0) * k) / n;
+          const py = y0 + ((y1 - y0) * k) / n;
+          if (Math.hypot(px - best.px, py - best.py) <= radius) pts.push([px, py]);
         }
       }
     }
   }
-  return best;
+  let ux = best.ux;
+  let uy = best.uy;
+  if (pts.length >= 3) {
+    let mx = 0;
+    let my = 0;
+    for (const [px, py] of pts) {
+      mx += px;
+      my += py;
+    }
+    mx /= pts.length;
+    my /= pts.length;
+    let sxx = 0;
+    let syy = 0;
+    let sxy = 0;
+    for (const [px, py] of pts) {
+      sxx += (px - mx) ** 2;
+      syy += (py - my) ** 2;
+      sxy += (px - mx) * (py - my);
+    }
+    const angle = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+    ux = Math.cos(angle);
+    uy = Math.sin(angle);
+  }
+  const L = Math.hypot(ux, uy);
+  return { d: best.d, ux: ux / L, uy: uy / L, px: best.px, py: best.py };
 }

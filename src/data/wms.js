@@ -18,7 +18,7 @@ export function getMapUrl(layer, bbox, width, height, format) {
   return `${WMS_R}?${p}`;
 }
 
-export async function fetchWithRetry(url, { tries = 4, signal } = {}) {
+export async function fetchWithRetry(url, { tries = 5, signal } = {}) {
   let lastErr;
   for (let a = 0; a < tries; a++) {
     try {
@@ -34,7 +34,7 @@ export async function fetchWithRetry(url, { tries = 4, signal } = {}) {
     } catch (e) {
       if (signal?.aborted) throw e;
       lastErr = e;
-      await new Promise((r) => setTimeout(r, 1000 * 2 ** a));
+      await new Promise((r) => setTimeout(r, Math.min(8000, 700 * 2 ** a)));
     }
   }
   throw lastErr;
@@ -87,13 +87,22 @@ async function runPool(items, limit, fn) {
  * Télécharge une couche altimétrique en float32 (BIL) sur la grille.
  * Les trous éventuels du LiDAR HD sont comblés avec la couche de secours.
  */
-export async function fetchFloatGrid(grid, layer, fallbackLayer, { onProgress, signal } = {}) {
+export async function fetchFloatGrid(grid, layer, fallbackLayer, { onProgress, signal, warnings } = {}) {
   const out = new Float32Array(grid.nx * grid.ny);
   const blocks = blocksOf(grid);
   let done = 0;
   await runPool(blocks, 4, async (b) => {
     const url = getMapUrl(layer, b.bbox, b.w, b.h, 'image/x-bil;bits=32');
-    let data = new Float32Array(await cachedBuffer(url, signal));
+    let data;
+    try {
+      data = new Float32Array(await cachedBuffer(url, signal));
+    } catch (e) {
+      if (!fallbackLayer || signal?.aborted) throw e;
+      // Service momentanément indisponible : bloc entier pris sur la couche de secours.
+      console.warn('MNT principal indisponible, repli', e);
+      warnings?.push(`relief : bloc pris dans ${fallbackLayer}`);
+      data = new Float32Array(await cachedBuffer(getMapUrl(fallbackLayer, b.bbox, b.w, b.h, 'image/x-bil;bits=32'), signal));
+    }
     if (data.length !== b.w * b.h) throw new Error('Taille de bloc MNT inattendue');
     let holes = 0;
     for (let k = 0; k < data.length; k++) if (!(data[k] > -1000)) holes++;
@@ -112,22 +121,56 @@ export async function fetchFloatGrid(grid, layer, fallbackLayer, { onProgress, s
   return out;
 }
 
-/** Télécharge une couche image (PNG) et renvoie les pixels RGBA sur la grille. */
-export async function fetchRgbaGrid(grid, layer, { onProgress, signal } = {}) {
+async function decodePng(buf, w, h) {
+  const bmp = await createImageBitmap(new Blob([buf], { type: 'image/png' }), {
+    colorSpaceConversion: 'none',
+    premultiplyAlpha: 'none',
+  });
+  const cv = new OffscreenCanvas(w, h);
+  const ctx = cv.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(bmp, 0, 0);
+  return ctx.getImageData(0, 0, w, h).data;
+}
+
+/**
+ * Télécharge une couche image (PNG) et renvoie les pixels RGBA sur la grille.
+ * Les pixels transparents (zone non couverte) sont complétés par la couche de repli.
+ */
+export async function fetchRgbaGrid(grid, layer, fallbackLayer, { onProgress, signal, warnings } = {}) {
   const out = new Uint8ClampedArray(grid.nx * grid.ny * 4);
   const blocks = blocksOf(grid);
   let done = 0;
   await runPool(blocks, 4, async (b) => {
-    const url = getMapUrl(layer, b.bbox, b.w, b.h, 'image/png');
-    const buf = await cachedBuffer(url, signal);
-    const bmp = await createImageBitmap(new Blob([buf], { type: 'image/png' }), {
-      colorSpaceConversion: 'none',
-      premultiplyAlpha: 'none',
-    });
-    const cv = new OffscreenCanvas(b.w, b.h);
-    const ctx = cv.getContext('2d', { willReadFrequently: true });
-    ctx.drawImage(bmp, 0, 0);
-    const px = ctx.getImageData(0, 0, b.w, b.h).data;
+    const load = async (lyr) => decodePng(await cachedBuffer(getMapUrl(lyr, b.bbox, b.w, b.h, 'image/png'), signal), b.w, b.h);
+    let px;
+    try {
+      px = await load(layer);
+    } catch (e) {
+      if (signal?.aborted) throw e;
+      console.warn(`${layer} indisponible`, e);
+      // Bloc vide : il sera entièrement complété par la couche de repli.
+      px = new Uint8ClampedArray(b.w * b.h * 4);
+    }
+    let holes = 0;
+    for (let k = 3; k < px.length; k += 4) if (px[k] < 128) holes++;
+    if (holes > 0 && fallbackLayer) {
+      let fb = null;
+      try {
+        fb = await load(fallbackLayer);
+      } catch (e) {
+        if (signal?.aborted) throw e;
+        console.warn(`${fallbackLayer} indisponible`, e);
+        warnings?.push('occupation du sol incomplète (classe « autre » utilisée)');
+      }
+      for (let k = 0; fb && k < px.length; k += 4) {
+        if (px[k + 3] < 128) {
+          px[k] = fb[k];
+          px[k + 1] = fb[k + 1];
+          px[k + 2] = fb[k + 2];
+          px[k + 3] = fb[k + 3];
+        }
+      }
+    }
     for (let r = 0; r < b.h; r++) {
       out.set(px.subarray(r * b.w * 4, (r + 1) * b.w * 4), ((b.j0 + r) * grid.nx + b.i0) * 4);
     }

@@ -1,7 +1,8 @@
 // Test de bout en bout dans Chromium : chargement, simulation sur une petite zone, captures.
 // Usage : node test/e2e.cjs <url> <dossier de sortie> [zone=view|basin] [res]
 const { chromium } = require(process.env.PLAYWRIGHT || 'playwright');
-const [url = 'http://localhost:4173/', outDir = '.', zone = 'view', res = '10', mm = '120', hours = '3', tail = '2'] = process.argv.slice(2);
+const [url = 'http://localhost:4173/', outDir = '.', zone = 'view', res = '10', mm = '120', hours = '3', tail = '2', engine = 'auto'] =
+  process.argv.slice(2);
 (async () => {
   // Proxy éventuel de l'environnement (sans passer par l'option de Playwright, qui force
   // aussi localhost à passer par le proxy).
@@ -20,10 +21,12 @@ const [url = 'http://localhost:4173/', outDir = '.', zone = 'view', res = '10', 
   });
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(url);
-  await page.waitForFunction(() => document.querySelector('#res option'), null, { timeout: 60000 });
+  await page.waitForFunction(() => document.querySelector('#res option'), null, { timeout: 180000 });
   await page.waitForTimeout(4000);
   await page.screenshot({ path: `${outDir}/01-accueil.png` });
   console.log('moteur :', await page.textContent('#engine-info'));
+  await page.click('details summary');
+  await page.selectOption('#engine', engine);
   await page.selectOption('#zone', zone);
   await page.selectOption('#res', res);
   await page.fill('#rain-mm', mm);

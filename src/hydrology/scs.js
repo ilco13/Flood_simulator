@@ -36,21 +36,28 @@ export function runoffRate(P, S) {
 
 /**
  * Calcule pour chaque maille la rétention S (mm, -1 = pas de pluie) et le Manning n.
- * @param classes  indices de classe COSIA
+ * @param classes  indices de classe COSIA, `spc` échantillons consécutifs par maille
+ *                 (CN et n moyennés par surface sur ces échantillons)
  * @param mask     1 = la pluie tombe sur cette maille (bassin versant), 0 sinon ; null = partout
  * @param soilGroup 0..3 pour A..D
  * @param amc      1, 2 ou 3
  * @param cnFactor multiplicateur global de calage sur S (1 = sans calage)
  */
-export function buildRunoffFields(classes, mask, soilGroup, amc, cnFactor = 1) {
-  const n = classes.length;
+export function buildRunoffFields(classes, mask, soilGroup, amc, cnFactor = 1, spc = 1) {
+  const n = classes.length / spc;
   const S = new Float32Array(n);
   const manning = new Float32Array(n);
-  const sByClass = CLASSES.map((c) => retentionMm(adjustCn(c.cn[soilGroup], amc)) * cnFactor);
+  const cnByClass = CLASSES.map((c) => adjustCn(c.cn[soilGroup], amc));
+  const nByClass = CLASSES.map((c) => c.n);
   for (let k = 0; k < n; k++) {
-    const c = classes[k];
-    S[k] = mask && !mask[k] ? -1 : sByClass[c];
-    manning[k] = CLASSES[c].n;
+    let cn = 0;
+    let nm = 0;
+    for (let m = k * spc; m < (k + 1) * spc; m++) {
+      cn += cnByClass[classes[m]];
+      nm += nByClass[classes[m]];
+    }
+    S[k] = mask && !mask[k] ? -1 : retentionMm(cn / spc) * cnFactor;
+    manning[k] = nm / spc;
   }
   return { S, manning };
 }

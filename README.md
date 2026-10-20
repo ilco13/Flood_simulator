@@ -24,7 +24,7 @@ Le calcul tourne **dans le navigateur**, sur la carte graphique (WebGPU) quand e
 
 | Donnée | Couche | Usage |
 |---|---|---|
-| Relief | `IGNF_LIDAR-HD_MNT_ELEVATION.ELEVATIONGRIDCOVERAGE.LAMB93` (MNT LiDAR HD 0,5 m), avec repli sur RGE ALTI 1 m | altitude du terrain (float32 via WMS-R) |
+| Relief | `IGNF_LIDAR-HD_MNT_ELEVATION.ELEVATIONGRIDCOVERAGE.LAMB93` (MNT LiDAR HD 0,5 m), avec repli sur RGE ALTI 1 m (`RGEALTI-MNT_PYR-ZIP_FXX_LAMB93_WMS`) | altitude du terrain (float32 via WMS-R) |
 | Occupation du sol | `IGNF_COSIA_2024-2026` (IA, 20 cm) | coefficient de ruissellement (CN) et rugosité (Manning) |
 | Cours d'eau | `BDTOPO_V3:troncon_hydrographique` (WFS) | gravure des vallats dans le relief, points de suivi, affichage |
 | Fond de carte | BD ORTHO (WMTS) + Plan IGN vectoriel (routes, noms) | vue « hybride » |

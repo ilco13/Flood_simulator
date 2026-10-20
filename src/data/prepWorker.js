@@ -5,7 +5,7 @@ import { LAYERS } from '../config.js';
 import { fetchFloatGrid, fetchRgbaGrid } from './wms.js';
 import { fetchRivers } from './rivers.js';
 import { classifyRgba, classFractions } from '../hydrology/landcover.js';
-import { prepareTerrain, buildGauges } from '../sim/model.js';
+import { prepareTerrain, buildGauges, landcoverOversampling, regroupSamples } from '../sim/model.js';
 import { maskOutline } from '../hydrology/terrain.js';
 import { toWgs } from '../geo.js';
 
@@ -22,14 +22,21 @@ self.onmessage = async (e) => {
   const { grid, burnDepth, outlet, gauges: gaugeDefs } = e.data;
   try {
     const step = (label, p) => post('progress', { label, p });
+    const warnings = [];
     const N = grid.nx * grid.ny;
 
     step('Relief LiDAR HD (IGN)…', 0);
     const demP = fetchFloatGrid(grid, LAYERS.dem, LAYERS.demFallback, {
       onProgress: (p) => step('Relief LiDAR HD (IGN)…', p),
+      warnings,
     });
-    const lcP = fetchRgbaGrid(grid, LAYERS.landcover, {
+    // Occupation du sol sur-échantillonnée (f×f pixels par maille) pour ne pas perdre
+    // le bâti et les routes aux résolutions grossières.
+    const f = landcoverOversampling(grid.dx);
+    const subGrid = { ...grid, dx: grid.dx / f, nx: grid.nx * f, ny: grid.ny * f };
+    const lcP = fetchRgbaGrid(subGrid, LAYERS.landcover, LAYERS.landcoverFallback, {
       onProgress: (p) => step('Occupation du sol COSIA (IGN)…', p),
+      warnings,
     });
     const bboxPad = {
       xmin: grid.xmin - 500,
@@ -39,13 +46,15 @@ self.onmessage = async (e) => {
     };
     const rivP = fetchRivers(bboxPad).catch((err) => {
       console.warn('BD TOPO indisponible', err);
+      warnings.push('réseau BD TOPO indisponible (pas de gravure ni de points de suivi)');
       return { type: 'FeatureCollection', features: [] };
     });
     const [dem, rgba, rivers] = await Promise.all([demP, lcP, rivP]);
 
     step('Classification de l\'occupation du sol…', 1);
-    const classes = classifyRgba(rgba, N);
-    const fractions = classFractions(classes);
+    const sub = classifyRgba(rgba, N * f * f);
+    const fractions = classFractions(sub);
+    const classes = regroupSamples(sub, grid, f);
 
     step('Gravure des cours d\'eau et délimitation du bassin…', 1);
     const terrain = prepareTerrain({ grid, dem, rivers, burnDepth, outlet });
@@ -89,6 +98,7 @@ self.onmessage = async (e) => {
       {
         dem,
         classes,
+        spc: f * f,
         fractions,
         z: terrain.z,
         mask: terrain.mask,
@@ -96,6 +106,7 @@ self.onmessage = async (e) => {
         burned: terrain.burned,
         gauges,
         outline,
+        warnings: [...new Set(warnings)],
         rivers: display,
       },
       transfer,
