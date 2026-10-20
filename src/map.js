@@ -63,6 +63,7 @@ export async function createMap(container) {
       shadow: { type: 'raster', tiles: [SHADOW_TILES], tileSize: 256, maxzoom: 18 },
       rivers: { type: 'geojson', data: EMPTY },
       basin: { type: 'geojson', data: EMPTY },
+      catchment: { type: 'geojson', data: EMPTY },
       gauges: { type: 'geojson', data: EMPTY },
       probe: { type: 'geojson', data: EMPTY },
       section: { type: 'geojson', data: EMPTY },
@@ -94,6 +95,27 @@ export async function createMap(container) {
         type: 'line',
         source: 'basin',
         paint: { 'line-color': '#ffd84d', 'line-width': 1.5, 'line-dasharray': [3, 2], 'line-opacity': 0.9 },
+      },
+      {
+        id: 'catchment-fill',
+        type: 'fill',
+        source: 'catchment',
+        filter: ['==', ['geometry-type'], 'Polygon'],
+        paint: { 'fill-color': '#ff9f1c', 'fill-opacity': 0.12 },
+      },
+      {
+        id: 'catchment-line',
+        type: 'line',
+        source: 'catchment',
+        filter: ['==', ['geometry-type'], 'Polygon'],
+        paint: { 'line-color': '#ff9f1c', 'line-width': 2.5, 'line-dasharray': [2, 1.5] },
+      },
+      {
+        id: 'catchment-point',
+        type: 'circle',
+        source: 'catchment',
+        filter: ['==', ['geometry-type'], 'Point'],
+        paint: { 'circle-radius': 6, 'circle-color': '#ff9f1c', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 },
       },
       ...(overlay?.layers || []),
       {
@@ -240,7 +262,7 @@ export function setGeoJson(map, id, data) {
 }
 
 /** Cadre la carte sur des coins [lon, lat], en tenant compte du panneau sur téléphone. */
-export function fitBoundsOf(map, corners) {
+export function fitBoundsOf(map, corners, extraPad = 0) {
   const lons = corners.map((c) => c[0]);
   const lats = corners.map((c) => c[1]);
   const mobile = window.matchMedia('(max-width: 760px)').matches;
@@ -250,7 +272,9 @@ export function fitBoundsOf(map, corners) {
       [Math.max(...lons), Math.max(...lats)],
     ],
     {
-      padding: mobile ? { top: 20, left: 20, right: 20, bottom: Math.round(window.innerHeight * 0.58) + 20 } : 30,
+      padding: mobile
+        ? { top: 20 + extraPad, left: 20 + extraPad, right: 20 + extraPad, bottom: Math.round(window.innerHeight * 0.58) + 20 }
+        : 30 + extraPad,
       pitch: map.getPitch(),
       duration: 800,
     },

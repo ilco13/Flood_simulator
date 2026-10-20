@@ -6,7 +6,7 @@ import { fetchFloatGrid, fetchRgbaGrid } from './wms.js';
 import { fetchRivers } from './rivers.js';
 import { classifyRgba, classFractions } from '../hydrology/landcover.js';
 import { prepareTerrain, buildGauges, landcoverOversampling, regroupSamples } from '../sim/model.js';
-import { maskOutline } from '../hydrology/terrain.js';
+import { outlineWgs } from './outline.js';
 import { toWgs } from '../geo.js';
 
 const toWgsCoords = (coords) => coords.map(([x, y]) => toWgs(x, y));
@@ -19,7 +19,7 @@ function geomToWgs(g) {
 const post = (type, data, transfer) => self.postMessage({ type, ...data }, transfer || []);
 
 self.onmessage = async (e) => {
-  const { grid, burnDepth, outlet, gauges: gaugeDefs } = e.data;
+  const { grid, burnDepth, outlet, upstreamOf, gauges: gaugeDefs } = e.data;
   try {
     const last = {};
     const step = (key, p, detail) => {
@@ -73,25 +73,10 @@ self.onmessage = async (e) => {
     const classes = regroupSamples(sub, grid, f);
 
     step('prep', 0.4);
-    const terrain = prepareTerrain({ grid, dem, rivers, burnDepth, outlet });
+    const terrain = prepareTerrain({ grid, dem, rivers, burnDepth, outlet, upstreamOf });
     const gauges = buildGauges(grid, rivers, gaugeDefs);
 
-    let outline = [];
-    if (terrain.mask) {
-      // Contour simplifié : on supprime les points alignés.
-      outline = maskOutline(terrain.mask, grid.nx, grid.ny).map((ring) => {
-        const out = [ring[0]];
-        for (let i = 1; i < ring.length - 1; i++) {
-          const [ax, ay] = out[out.length - 1];
-          const [bx, by] = ring[i];
-          const [cx, cy] = ring[i + 1];
-          if ((bx - ax) * (cy - by) - (by - ay) * (cx - bx) !== 0) out.push(ring[i]);
-        }
-        out.push(ring[ring.length - 1]);
-        // Coordonnées de grille -> WGS84
-        return out.map(([gx, gy]) => toWgs(grid.xmin + gx * grid.dx, grid.ymax - gy * grid.dx));
-      });
-    }
+    const outline = terrain.mask ? outlineWgs(terrain.mask, grid) : [];
     step('prep', 0.9);
     for (const g of gauges) g.lineWgs = g.line.map(([x, y]) => toWgs(x, y));
 

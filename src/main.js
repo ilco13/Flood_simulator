@@ -135,9 +135,10 @@ function describeRes() {
     const est = s < 90 ? `${Math.max(10, Math.round(s / 10) * 10)} s` : `${Math.round(s / 60)} min`;
     txt += `Calcul ${engine === 'gpu' ? 'GPU' : 'CPU'}, environ ${est} (ordre de grandeur).`;
   }
-  if (p.zone === 'view')
+  if (p.zone === 'view' && !state.catchment)
     txt += ' <span class="warn">En mode zone affichée, l\'eau venant de l\'amont hors écran n\'est pas comptée.</span>';
   $('res-info').innerHTML = txt;
+  describeCatchment();
 }
 
 function updateRainInfo() {
@@ -253,6 +254,7 @@ function setupUi() {
   });
   $('play').onclick = togglePlay;
   setupSection();
+  setupCatchment();
   $('import-file').addEventListener('change', async (e) => {
     const f = e.target.files[0];
     e.target.value = '';
@@ -431,7 +433,12 @@ async function workerFailure(e, what) {
 
 
 function loadData(grid, p) {
-  const key = JSON.stringify([grid.xmin, grid.ymin, grid.nx, grid.ny, grid.dx, p.burn]);
+  const c = p.zone === 'view' ? state.catchment : null;
+  const upstreamOf = c
+    ? { x: c.point.x, y: c.point.y, areaM2: c.areaKm2 * 1e6, radiusM: Math.max(30, 1.5 * c.dx) }
+    : null;
+  const gauges = c ? [studyGauge(c), ...GAUGES] : GAUGES;
+  const key = JSON.stringify([grid.xmin, grid.ymin, grid.nx, grid.ny, grid.dx, p.burn, upstreamOf]);
   if (state.data?.key === key) return Promise.resolve(state.data);
   return new Promise((resolve, reject) => {
     const w = new Worker(new URL('./data/prepWorker.js', import.meta.url), { type: 'module' });
@@ -456,7 +463,7 @@ function loadData(grid, p) {
       reject(new Error(await workerFailure(e, 'la préparation des données')));
     };
     const outlet = p.zone === 'basin' ? OUTLET : null;
-    w.postMessage({ grid, burnDepth: p.burn, outlet, gauges: GAUGES });
+    w.postMessage({ grid, burnDepth: p.burn, outlet, upstreamOf, gauges });
   });
 }
 
@@ -904,11 +911,202 @@ function setupMapTip() {
   state.map.on('movestart', () => (tip.hidden = true));
 }
 
+/* ---------- Bassin versant du point étudié (mode zone affichée) ---------- */
+
+const CATCH_KEY = 'flood-sim-catchment';
+
+/** Point de suivi du débit au point étudié. */
+function studyGauge(c) {
+  const halfWidth = Math.round(Math.min(450, Math.max(40, 40 * Math.sqrt(c.areaKm2))));
+  return { id: 'point', name: 'Point étudié', x: c.point.x, y: c.point.y, river: c.river || null, halfWidth };
+}
+
+function setupCatchment() {
+  const sync = () => ($('catch-box').hidden = params().zone !== 'view');
+  $('zone').addEventListener('input', sync);
+  sync();
+  $('catch-pick').onclick = () => setCatchMode(!state.catchMode);
+  $('catch-fit').onclick = fitCatchment;
+  $('catch-clear').onclick = clearCatchment;
+  try {
+    const saved = JSON.parse(localStorage.getItem(CATCH_KEY) || 'null');
+    if (saved?.point && saved?.outline) state.catchment = saved;
+  } catch {
+    /* stockage indisponible : sans importance */
+  }
+}
+
+/** Appelé quand la carte est prête. */
+function restoreCatchment() {
+  if (state.catchment) showCatchment();
+}
+
+function setCatchMode(on) {
+  state.catchMode = on;
+  if (on && state.sectionMode) $('section-place').click();
+  $('catch-pick').classList.toggle('on', on);
+  if (state.map) state.map.getCanvas().style.cursor = on ? 'crosshair' : '';
+  if (on) {
+    $('catch-info').textContent = "Cliquez sur la carte dans le lit du cours d'eau, à l'endroit à étudier.";
+    if (window.matchMedia('(max-width: 760px)').matches) $('panel').classList.add('collapsed');
+  } else describeCatchment();
+}
+
+function pickCatchment(ll) {
+  setCatchMode(false);
+  const [x, y] = toL93(ll.lng, ll.lat);
+  state.catchWorker?.terminate();
+  const w = new Worker(new URL('./data/catchmentWorker.js', import.meta.url), { type: 'module' });
+  state.catchWorker = w;
+  state.catchment = null;
+  setGeoJson(state.map, 'catchment', {
+    type: 'FeatureCollection',
+    features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: [ll.lng, ll.lat] }, properties: {} }],
+  });
+  $('catch-fit').disabled = true;
+  $('catch-clear').disabled = false;
+  const info = $('catch-info');
+  const badge = $('map-status');
+  const say = (txt) => {
+    info.textContent = txt;
+    if (state.run?.running || state.prepWorker) return;
+    badge.className = '';
+    badge.textContent = txt;
+    badge.hidden = false;
+  };
+  say("Recherche de l'amont du point…");
+  const end = () => {
+    w.terminate();
+    if (state.catchWorker === w) state.catchWorker = null;
+    if (!state.run?.running && !state.prepWorker) badge.hidden = true;
+  };
+  w.onmessage = (e) => {
+    const m = e.data;
+    if (m.type === 'progress') say(`Recherche de l'amont dans un carré de ${fmtNum(m.sizeKm)} km (étape ${m.level + 1}/${m.levels})…`);
+    else if (m.type === 'done') {
+      end();
+      state.catchment = { point: m.point, pointWgs: m.pointWgs, areaKm2: m.areaKm2, river: m.river, dx: m.dx, complete: m.complete, bbox: m.bbox, outline: m.outline };
+      try {
+        localStorage.setItem(CATCH_KEY, JSON.stringify(state.catchment));
+      } catch {
+        /* stockage plein ou interdit */
+      }
+      showCatchment();
+      describeRes();
+      if (window.matchMedia('(max-width: 760px)').matches) $('panel').classList.remove('collapsed');
+    } else if (m.type === 'error') {
+      end();
+      info.innerHTML = `<span class="warn">Bassin versant introuvable : ${m.message}</span>`;
+    }
+  };
+  w.onerror = async (e) => {
+    end();
+    info.innerHTML = `<span class="warn">${await workerFailure(e, 'la recherche du bassin versant')}</span>`;
+  };
+  w.postMessage({ x, y, burnDepth: params().burn });
+}
+
+function showCatchment() {
+  const c = state.catchment;
+  if (!c || !state.map) return;
+  setGeoJson(state.map, 'catchment', {
+    type: 'FeatureCollection',
+    features: [
+      ...c.outline.map((ring) => ({ type: 'Feature', geometry: { type: 'Polygon', coordinates: [ring] }, properties: {} })),
+      { type: 'Feature', geometry: { type: 'Point', coordinates: c.pointWgs }, properties: {} },
+    ],
+  });
+  $('catch-fit').disabled = false;
+  $('catch-clear').disabled = false;
+}
+
+function clearCatchment() {
+  state.catchWorker?.terminate();
+  state.catchWorker = null;
+  state.catchment = null;
+  try {
+    localStorage.removeItem(CATCH_KEY);
+  } catch {
+    /* rien */
+  }
+  setGeoJson(state.map, 'catchment', { type: 'FeatureCollection', features: [] });
+  $('catch-fit').disabled = true;
+  $('catch-clear').disabled = true;
+  $('catch-info').textContent = '';
+  describeRes();
+}
+
+/** Emprise (Lambert 93) à afficher pour voir tout le bassin, avec une petite marge. */
+function catchmentFrame(c) {
+  const { xmin, xmax, ymin, ymax } = c.bbox;
+  const m = Math.max(150, 0.06 * Math.max(xmax - xmin, ymax - ymin));
+  return { xmin: xmin - m, xmax: xmax + m, ymin: ymin - m, ymax: ymax + m };
+}
+
+/** Résolution la plus fine qui tient sur cet appareil pour une emprise donnée. */
+function finestResFor(p, bbox) {
+  for (const r of [...ZOOM_RESOLUTIONS].sort((a, b) => a - b)) {
+    const cells = Math.ceil((bbox.xmax - bbox.xmin) / r) * Math.ceil((bbox.ymax - bbox.ymin) / r);
+    if (chooseEngine({ ...p, res: r }, cells)) return r;
+  }
+  return null;
+}
+
+function describeCatchment() {
+  const c = state.catchment;
+  const info = $('catch-info');
+  if (!c || state.catchMode || state.catchWorker) return;
+  const p = params();
+  const wKm = (c.bbox.xmax - c.bbox.xmin) / 1000;
+  const hKm = (c.bbox.ymax - c.bbox.ymin) / 1000;
+  let txt =
+    `Bassin versant ${c.river ? `du point (${c.river})` : 'du point'} : <strong>${fmtNum(c.areaKm2, c.areaKm2 < 10 ? 1 : 0)} km²</strong> ` +
+    `(contour orange), qui tient dans un rectangle de ${fmtNum(wKm, 1)} × ${fmtNum(hKm, 1)} km.`;
+  if (!c.complete) txt += ' <span class="warn">Il dépasse la zone explorée (60 km) : contour incomplet.</span>';
+  if (state.map && p.zone === 'view') {
+    const g = currentGrid(p);
+    const b = c.bbox;
+    const ox = Math.max(0, Math.min(g.xmax, b.xmax) - Math.max(g.xmin, b.xmin));
+    const oy = Math.max(0, Math.min(g.ymax, b.ymax) - Math.max(g.ymin, b.ymin));
+    const cover = (ox * oy) / Math.max(1, (b.xmax - b.xmin) * (b.ymax - b.ymin));
+    if (cover > 0.995) txt += ' <span class="ok">✓ La zone affichée contient tout l\'amont.</span>';
+    else
+      txt +=
+        ` <span class="warn">La zone affichée n'en couvre qu'environ ${fmtNum(cover * 100)} % : ` +
+        'dézoomez jusqu\'à voir tout le contour orange, ou touchez « Cadrer sur son bassin ».</span>';
+    const r = finestResFor(p, catchmentFrame(c));
+    if (r) txt += ` Cadré sur le bassin, la maille la plus fine possible ici est de <strong>${r} m</strong>.`;
+    else
+      txt +=
+        ' <span class="warn">Bassin trop grand pour le mode zone affichée sur cet appareil : ' +
+        'choisissez « Haute vallée de l\'Arc (bassin entier) ».</span>';
+    if (p.basinOnly) txt += ' La pluie ne tombera que sur ce bassin.';
+  }
+  info.innerHTML = txt;
+}
+
+function fitCatchment() {
+  const c = state.catchment;
+  if (!c) return;
+  const f = catchmentFrame(c);
+  fitBoundsOf(state.map, [toWgs(f.xmin, f.ymax), toWgs(f.xmax, f.ymax), toWgs(f.xmax, f.ymin), toWgs(f.xmin, f.ymin)]);
+  state.map.once('moveend', () => {
+    const p = params();
+    const g = currentGrid(p);
+    if (!chooseEngine(p, g.nx * g.ny)) {
+      const r = finestResFor(p, g);
+      if (r) $('res').value = r;
+    }
+    describeRes();
+  });
+}
+
 /* ---------- Coupe en travers ---------- */
 
 function setupSection() {
   $('section-place').onclick = () => {
     state.sectionMode = !state.sectionMode;
+    if (state.sectionMode && state.catchMode) setCatchMode(false);
     $('section-place').classList.toggle('on', state.sectionMode);
     if (state.map) state.map.getCanvas().style.cursor = state.sectionMode ? 'crosshair' : '';
     $('section-hint').textContent = state.sectionMode
@@ -1383,8 +1581,10 @@ async function main() {
   state.map.on('moveend', () => {
     if (params().zone === 'view') describeRes();
   });
+  restoreCatchment();
   state.map.on('click', (e) => {
-    if (state.sectionMode) placeSection(e.lngLat);
+    if (state.catchMode) pickCatchment(e.lngLat);
+    else if (state.sectionMode) placeSection(e.lngLat);
     else probeAt(e.lngLat);
   });
   setupMapTip();

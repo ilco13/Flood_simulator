@@ -177,8 +177,9 @@ export class CpuSolver {
         const k = g.cells[m];
         const i = k % nx;
         const j = (k - i) / nx;
-        const ux = 0.5 * (qx[j * (nx + 1) + i] + qx[j * (nx + 1) + i + 1]);
-        const uy = 0.5 * (qy[j * nx + i] + qy[(j + 1) * nx + i]);
+        // Face est (qx) et face sud (qy) de la maille.
+        const ux = qx[j * (nx + 1) + i + 1];
+        const uy = qy[(j + 1) * nx + i];
         Q += ux * g.wx[m] + uy * g.wy[m];
       }
       return Math.abs(Q);

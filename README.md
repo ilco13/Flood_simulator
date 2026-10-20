@@ -10,7 +10,8 @@ Application web qui simule la montée des eaux dans la **haute vallée de l'Arc*
 2. Choisir l'**humidité du sol** avant l'épisode (sec, normal ou saturé) et le type de sol.
 3. Choisir la **zone** :
    - *Haute vallée de l'Arc* : tout le bassin, de Pourrières à Aix (Pont de l'Arc), à 50, 25, 15, 10 ou 5 m ;
-   - *Zone affichée* : la portion visible de la carte, en détail fin (jusqu'à 1 m). L'eau venant de l'amont hors écran n'y est pas comptée.
+   - *Zone affichée* : la portion visible de la carte, en détail fin (jusqu'à 1 m). L'eau venant de l'amont hors écran n'y est pas comptée. Pour savoir jusqu'où dézoomer, **« Choisir le point étudié »** puis un clic dans le lit du cours d'eau : l'application trace tout le **bassin versant amont** de ce point (contour orange, surface en km²), indique quelle part en couvre la zone affichée, et **« Cadrer sur son bassin »** ajuste la carte (et la maille si besoin). La simulation ajoute alors un point de suivi « Point étudié ».
+   - *Pluie seulement sur le bassin versant étudié* : la pluie ne tombe que sur les terrains qui s'écoulent vers l'exutoire (l'Arc à Aix en bassin entier, le point étudié en zone affichée).
 4. **Lancer la simulation**. L'eau apparaît au fil du calcul.
 5. Explorer les résultats :
    - curseur temporel et lecture animée ;
@@ -41,7 +42,8 @@ Le calcul tourne **dans le navigateur**, sur la carte graphique (WebGPU) quand e
 - **Préparation du relief** :
   - gravure du réseau BD TOPO en chemin 4-connexe (passage sous les ponts et remblais) ;
   - débrèchage contraint (Lindsay 2016) des micro-cuvettes créées par le rééchantillonnage ;
-  - délimitation du bassin versant de l'Arc par *priority-flood* (Barnes 2014).
+  - délimitation du bassin versant de l'Arc par *priority-flood* (Barnes 2014) ;
+  - bassin versant d'un point : directions d'écoulement D8 sur le relief comblé, calage du point sur le tracé BD TOPO puis sur la maille la plus drainée, et emprise agrandie par paliers (4 km à 10 m → 60 km à 100 m) tant que le bassin touche le bord.
 - **Points de suivi** : débit à travers une section perpendiculaire au cours d'eau.
 
 Les solveurs CPU (JavaScript, `src/sim/cpuSolver.js`) et GPU (WGSL, `src/sim/gpuSolver.js`) implémentent le même schéma. Un test vérifie qu'ils concordent.

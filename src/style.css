@@ -205,6 +205,12 @@ input[type='range'] {
 .warn {
   color: var(--danger);
 }
+.hint .ok {
+  color: #2e9e5b;
+}
+#catch-box .btn-row {
+  margin-bottom: 4px;
+}
 button.primary {
   width: 100%;
   margin-top: 12px;

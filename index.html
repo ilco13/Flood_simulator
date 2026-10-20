@@ -62,8 +62,13 @@
             </label>
             <label class="check">
               <input type="checkbox" id="basin-only" checked />
-              Pluie seulement sur le bassin versant de l'Arc
+              Pluie seulement sur le bassin versant étudié
             </label>
+            <p class="hint">
+              La pluie ne tombe que sur les terrains qui s'écoulent vers l'exutoire étudié : l'Arc à Aix pour le
+              bassin entier, ou le point choisi en mode « zone affichée ». Ailleurs, elle partirait vers d'autres
+              bassins et ne ferait que gonfler les bords de la carte.
+            </p>
           </section>
 
           <section>
@@ -74,6 +79,18 @@
                 <option value="view">Zone affichée à l'écran (détail fin)</option>
               </select>
             </label>
+            <div id="catch-box" hidden>
+              <p class="hint">
+                Choisissez le point à étudier (dans le lit du vallat) : l'application trace tout le bassin versant
+                qui l'alimente, pour savoir jusqu'où dézoomer.
+              </p>
+              <div class="btn-row">
+                <button id="catch-pick" class="ghost" type="button">Choisir le point étudié</button>
+                <button id="catch-fit" class="ghost" type="button" disabled>Cadrer sur son bassin</button>
+                <button id="catch-clear" class="ghost" type="button" disabled>Effacer</button>
+              </div>
+              <p id="catch-info" class="hint"></p>
+            </div>
             <label>Résolution
               <select id="res"></select>
             </label>

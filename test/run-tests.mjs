@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { makeHyetograph } from '../src/hydrology/rain.js';
 import { runoffMm, runoffRate, retentionMm, adjustCn } from '../src/hydrology/scs.js';
 import { CpuBackend, simulate } from '../src/sim/driver.js';
-import { drainageLabels, basinMask } from '../src/hydrology/terrain.js';
+import { CpuSolver } from '../src/sim/cpuSolver.js';
+import { buildGauges } from '../src/sim/model.js';
+import { drainageLabels, basinMask, accumulation, upstreamMask, flowDirections } from '../src/hydrology/terrain.js';
 
 let failures = 0;
 async function test(name, fn) {
@@ -158,6 +160,47 @@ await test('bassin versant : priority-flood étiquette la bonne sortie', () => {
   const { mask } = basinMask(label, 2 * nx + 15);
   assert.equal(mask[5 * nx + 15], 1);
   assert.equal(mask[25 * nx + 15], 0);
+});
+
+await test('bassin versant d\'un point : seul l\'amont est retenu', () => {
+  // Vallée en V qui descend vers le nord (j = 0) ; point au milieu du thalweg.
+  const nx = 31;
+  const ny = 40;
+  const z = new Float32Array(nx * ny);
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) z[j * nx + i] = 100 + j * 1 + Math.abs(i - 15) * 0.5;
+  const { parent, order, filled } = drainageLabels(z, nx, ny);
+  const down = flowDirections(filled, parent, order, nx, ny);
+  const acc = accumulation(down, order);
+  const k0 = 20 * nx + 15;
+  const { mask, cells } = upstreamMask(down, order, k0);
+  assert.equal(mask[30 * nx + 15], 1); // amont
+  assert.equal(mask[10 * nx + 15], 0); // aval
+  assert.equal(acc[k0], cells);
+  // Le thalweg draine plus que les versants, et les versants amont rejoignent le point.
+  assert.ok(acc[k0] > acc[20 * nx + 10]);
+  assert.equal(mask[35 * nx + 5], 1);
+  assert.ok(cells > 300);
+});
+
+await test('point de suivi oblique : chaque écoulement compté une seule fois', () => {
+  // Chenal de 10 mailles de large coulant vers l'est (q = 1 m²/s), coupé en biais.
+  const nx = 60;
+  const ny = 40;
+  const dx = 10;
+  const grid = { xmin: 0, ymin: 0, xmax: nx * dx, ymax: ny * dx, nx, ny, dx };
+  const qx = new Float32Array((nx + 1) * ny);
+  const qy = new Float32Array(nx * (ny + 1));
+  for (let j = 15; j < 25; j++) for (let i = 0; i <= nx; i++) qx[j * (nx + 1) + i] = 1;
+  for (const deg of [0, 20, 35, 50]) {
+    const a = (deg * Math.PI) / 180;
+    const rivers = {
+      type: 'FeatureCollection',
+      features: [{ type: 'Feature', properties: { name: 'r' }, geometry: { type: 'LineString', coordinates: [[300 - 200 * Math.cos(a), 200 - 200 * Math.sin(a)], [300 + 200 * Math.cos(a), 200 + 200 * Math.sin(a)]] } }],
+    };
+    const [g] = buildGauges(grid, rivers, [{ id: 'g', name: 'g', x: 300, y: 200, river: 'r', halfWidth: 150 }]);
+    const [Q] = CpuSolver.prototype.gaugeDischarges.call({ nx, qx, qy }, [g]);
+    assert.ok(Math.abs(Q - 100) < 1e-6, `angle ${deg}° : ${Q} m³/s au lieu de 100`);
+  }
 });
 
 console.log(failures ? `\n${failures} échec(s)` : '\nTous les tests passent.');

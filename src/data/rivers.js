@@ -56,6 +56,29 @@ export function isBurnable(f) {
   return n === 'Ecoulement naturel' || n === 'Conduit buse' || n === 'Ecoulement canalisé';
 }
 
+/** Point le plus proche sur un cours d'eau gravable, à moins de `maxDist` m (ou null). */
+export function nearestRiverPoint(rivers, x, y, maxDist) {
+  let best = null;
+  for (const f of rivers.features) {
+    if (!isBurnable(f)) continue;
+    for (const part of lineParts(f.geometry)) {
+      for (let s = 0; s < part.length - 1; s++) {
+        const [x0, y0] = part[s];
+        const [x1, y1] = part[s + 1];
+        const vx = x1 - x0;
+        const vy = y1 - y0;
+        const L2 = vx * vx + vy * vy;
+        const t = L2 ? Math.max(0, Math.min(1, ((x - x0) * vx + (y - y0) * vy) / L2)) : 0;
+        const px = x0 + t * vx;
+        const py = y0 + t * vy;
+        const d = Math.hypot(px - x, py - y);
+        if (d <= maxDist && (!best || d < best.d)) best = { d, x: px, y: py, name: f.properties.name };
+      }
+    }
+  }
+  return best;
+}
+
 function lineParts(geom) {
   if (geom.type === 'LineString') return [geom.coordinates];
   if (geom.type === 'MultiLineString') return geom.coordinates;

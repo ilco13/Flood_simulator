@@ -60,6 +60,9 @@ export function drainageLabels(z, nx, ny, breach = null) {
   const parent = new Int32Array(N).fill(-1);
   const eps = 1e-3;
   let breached = 0;
+  // Ordre de traitement : chaque maille apparaît après la maille vers laquelle elle s'écoule.
+  const order = new Int32Array(N);
+  let no = 0;
   // Le tas peut contenir chaque maille une fois.
   const heap = new MinHeap(N);
   for (let i = 0; i < nx; i++) {
@@ -84,6 +87,7 @@ export function drainageLabels(z, nx, ny, breach = null) {
   const dj = [0, 0, 1, -1];
   while (heap.size > 0) {
     const k = heap.pop();
+    order[no++] = k;
     const i = k % nx;
     const j = (k - i) / nx;
     const level = filled[k];
@@ -107,7 +111,7 @@ export function drainageLabels(z, nx, ny, breach = null) {
       heap.push(filled[kk], kk);
     }
   }
-  return { label, filled, breached };
+  return { label, filled, breached, parent, order };
 }
 
 /** Creuse un passage descendant depuis la cuvette (cote zn) en remontant la chaîne `parent`. */
@@ -146,6 +150,73 @@ export function basinMask(label, outletK) {
     }
   }
   return { mask, cells: area };
+}
+
+/**
+ * Directions d'écoulement D8 : chaque maille s'écoule vers son voisin (8 directions) de plus
+ * forte pente sur le MNT rempli, parmi les voisins traités avant elle par le priority-flood
+ * (ce qui garantit un graphe sans boucle, et `order` reste un ordre amont → aval inversé).
+ * Sur les zones plates (cuvettes comblées), on suit l'arbre du priority-flood (`parent`).
+ */
+export function flowDirections(filled, parent, order, nx, ny) {
+  const N = nx * ny;
+  const rank = new Int32Array(N);
+  for (let n = 0; n < N; n++) rank[order[n]] = n;
+  const down = new Int32Array(N).fill(-1);
+  const R2 = Math.SQRT1_2;
+  for (let k = 0; k < N; k++) {
+    const i = k % nx;
+    const j = (k - i) / nx;
+    let best = -1;
+    let bestS = 0;
+    for (let dj = -1; dj <= 1; dj++) {
+      const jj = j + dj;
+      if (jj < 0 || jj >= ny) continue;
+      for (let di = -1; di <= 1; di++) {
+        const ii = i + di;
+        if ((!di && !dj) || ii < 0 || ii >= nx) continue;
+        const kk = jj * nx + ii;
+        if (rank[kk] >= rank[k]) continue;
+        const s = (filled[k] - filled[kk]) * (di && dj ? R2 : 1);
+        if (s > bestS) {
+          bestS = s;
+          best = kk;
+        }
+      }
+    }
+    down[k] = best >= 0 ? best : parent[k];
+  }
+  return down;
+}
+
+/**
+ * Surface drainée (en nombre de mailles) de chaque maille, d'après les directions
+ * d'écoulement `parent` (parent[k] = maille vers laquelle k s'écoule) et l'ordre de traitement.
+ */
+export function accumulation(parent, order) {
+  const acc = new Float32Array(parent.length).fill(1);
+  for (let n = order.length - 1; n >= 0; n--) {
+    const k = order[n];
+    const p = parent[k];
+    if (p >= 0) acc[p] += acc[k];
+  }
+  return acc;
+}
+
+/** Masque (Uint8) de toutes les mailles situées en amont de `k0` (k0 compris). */
+export function upstreamMask(parent, order, k0) {
+  const mask = new Uint8Array(parent.length);
+  mask[k0] = 1;
+  let cells = 1;
+  for (let n = 0; n < order.length; n++) {
+    const k = order[n];
+    const p = parent[k];
+    if (p >= 0 && mask[p] && !mask[k]) {
+      mask[k] = 1;
+      cells++;
+    }
+  }
+  return { mask, cells };
 }
 
 /** Contour du masque sous forme de segments (pour l'affichage). Renvoie des anneaux grossiers. */

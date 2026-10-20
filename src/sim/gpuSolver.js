@@ -202,8 +202,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let nx = C.nx;
   let i = c.k % nx;
   let j = c.k / nx;
-  let ux = 0.5 * (qx[j * (nx + 1u) + i] + qx[j * (nx + 1u) + i + 1u]);
-  let uy = 0.5 * (qy[j * nx + i] + qy[(j + 1u) * nx + i]);
+  let ux = qx[j * (nx + 1u) + i + 1u];
+  let uy = qy[(j + 1u) * nx + i];
   atomicAdd(&sums[c.g], i32(round((ux * c.wx + uy * c.wy) * 1000.0)));
 }
 `;
