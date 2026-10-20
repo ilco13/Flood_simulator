@@ -1,0 +1,391 @@
+:root {
+  --bg: #ffffff;
+  --panel: #ffffff;
+  --text: #13202e;
+  --muted: #5b6b7c;
+  --line: #dfe5ec;
+  --field: #f3f6f9;
+  --accent: #1f6fe0;
+  --accent-text: #ffffff;
+  --danger: #d6363b;
+  --grid: rgba(90, 110, 130, 0.18);
+  --shadow: 0 6px 24px rgba(10, 30, 60, 0.18);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #0d1620;
+    --panel: #111c28;
+    --text: #e6edf4;
+    --muted: #93a4b6;
+    --line: #233243;
+    --field: #182636;
+    --accent: #4b93ff;
+    --grid: rgba(160, 180, 200, 0.16);
+    --shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+    color-scheme: dark;
+  }
+}
+:root[data-theme='dark'] {
+  --bg: #0d1620;
+  --panel: #111c28;
+  --text: #e6edf4;
+  --muted: #93a4b6;
+  --line: #233243;
+  --field: #182636;
+  --accent: #4b93ff;
+  --grid: rgba(160, 180, 200, 0.16);
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.4 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+#app {
+  position: fixed;
+  inset: 0;
+  display: flex;
+}
+#map {
+  flex: 1;
+  min-width: 0;
+}
+#panel {
+  width: 360px;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  z-index: 2;
+}
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.panel-head h1 {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: -0.01em;
+}
+.sub {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.handle {
+  display: none;
+}
+.scroll {
+  overflow-y: auto;
+  flex: 1;
+  padding: 4px 16px 24px;
+  overscroll-behavior: contain;
+}
+section {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+section:last-child {
+  border-bottom: 0;
+}
+h2 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+h3 {
+  margin: 14px 0 6px;
+  font-size: 13px;
+}
+label,
+.lbl {
+  display: block;
+  margin: 8px 0 4px;
+  font-size: 13px;
+  color: var(--text);
+}
+input[type='number'],
+select {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--field);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px; /* évite le zoom auto sur iOS */
+}
+input[type='range'] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+.row2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.row2 label {
+  margin-top: 0;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.chips button {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.chips button:hover {
+  color: var(--text);
+  border-color: var(--muted);
+}
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.check input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+.seg {
+  display: flex;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  overflow: hidden;
+  margin: 4px 0 6px;
+}
+.seg button {
+  flex: 1;
+  padding: 8px 6px;
+  border: 0;
+  background: var(--field);
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+.seg button + button {
+  border-left: 1px solid var(--line);
+}
+.seg button.on {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+.hint {
+  color: var(--muted);
+  font-size: 12.5px;
+  margin: 6px 0;
+}
+.hint strong {
+  color: var(--text);
+}
+.warn {
+  color: var(--danger);
+}
+button.primary {
+  width: 100%;
+  margin-top: 12px;
+  padding: 12px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font: inherit;
+  font-weight: 600;
+  font-size: 15px;
+  cursor: pointer;
+}
+button.primary.stop {
+  background: var(--danger);
+}
+button.ghost {
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+details summary {
+  cursor: pointer;
+  color: var(--muted);
+  margin-top: 10px;
+  font-size: 13px;
+}
+#progress {
+  margin-top: 10px;
+}
+.bar {
+  height: 6px;
+  background: var(--field);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.bar span {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  transition: width 0.2s;
+}
+.status {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.chart {
+  display: block;
+  width: 100%;
+  height: 170px;
+  margin-top: 6px;
+}
+.chart.small {
+  height: 90px;
+}
+.timeline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+.timeline span {
+  min-width: 64px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+}
+button.icon {
+  width: 36px;
+  height: 36px;
+  flex: none;
+  border-radius: 50%;
+  border: 0;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 14px;
+  cursor: pointer;
+}
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 8px 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.legend i {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  margin-right: 4px;
+  vertical-align: -2px;
+}
+.legend.gauges button {
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  padding: 2px 0;
+  cursor: pointer;
+  text-align: left;
+}
+.legend.gauges button.off {
+  opacity: 0.35;
+}
+.about p {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.maplibregl-ctrl-attrib {
+  font-size: 10px;
+}
+.maplibregl-popup-content {
+  color: #13202e;
+}
+
+/* Téléphone : panneau en feuille glissante en bas de l'écran */
+@media (max-width: 760px) {
+  #app {
+    flex-direction: column;
+  }
+  #map {
+    flex: 1;
+  }
+  #panel {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    height: 58vh;
+    border-right: 0;
+    border-top-left-radius: 16px;
+    border-top-right-radius: 16px;
+    box-shadow: var(--shadow);
+    transition: height 0.25s ease;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  #panel.collapsed {
+    height: 76px;
+  }
+  .panel-head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    padding-top: 6px;
+    cursor: pointer;
+  }
+  .handle {
+    display: block;
+    align-self: center;
+    width: 44px;
+    height: 5px;
+    border: 0;
+    border-radius: 3px;
+    background: var(--line);
+    padding: 0;
+  }
+  .scroll {
+    padding: 4px 16px 24px;
+  }
+}
+
+/* Téléphone : les contrôles du bas de la carte restent au-dessus de la feuille */
+@media (max-width: 760px) {
+  .maplibregl-ctrl-bottom-right,
+  .maplibregl-ctrl-bottom-left {
+    bottom: 58vh;
+    transition: bottom 0.25s ease;
+  }
+  #app:has(#panel.collapsed) .maplibregl-ctrl-bottom-right,
+  #app:has(#panel.collapsed) .maplibregl-ctrl-bottom-left {
+    bottom: 76px;
+  }
+}

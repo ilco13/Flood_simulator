@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b2540" />
+    <title>Crue de l'Arc</title>
+    <meta
+      name="description"
+      content="Simulateur d'inondation pluie-sur-maillage de la haute vallée de l'Arc (Bouches-du-Rhône) sur le relief LiDAR HD de l'IGN."
+    />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M16 3C11 11 7 16 7 21a9 9 0 0 0 18 0c0-5-4-10-9-18z' fill='%232b7de9'/></svg>" />
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <aside id="panel" aria-label="Paramètres de simulation">
+        <header class="panel-head">
+          <button id="panel-toggle" class="handle" aria-label="Replier le panneau"></button>
+          <div>
+            <h1>Crue de l'Arc</h1>
+            <p class="sub">Simulateur d'inondation · haute vallée de l'Arc</p>
+          </div>
+        </header>
+
+        <div class="scroll">
+          <section>
+            <h2>Pluie</h2>
+            <div class="row2">
+              <label>Cumul (mm)
+                <input id="rain-mm" type="number" inputmode="decimal" value="100" min="1" max="1500" step="5" />
+              </label>
+              <label>Durée (h)
+                <input id="rain-h" type="number" inputmode="decimal" value="24" min="0.25" max="96" step="0.25" />
+              </label>
+            </div>
+            <div class="row2 chips-row">
+              <div class="chips" data-target="rain-mm" data-values="50,100,150,200,300"></div>
+              <div class="chips" data-target="rain-h" data-values="1,3,6,12,24,48"></div>
+            </div>
+            <label>Répartition dans le temps
+              <select id="rain-shape"></select>
+            </label>
+            <canvas id="hyeto" class="chart small" aria-label="Hyétogramme"></canvas>
+            <p id="rain-info" class="hint"></p>
+          </section>
+
+          <section>
+            <h2>Sol</h2>
+            <span class="lbl">Humidité avant l'épisode</span>
+            <div class="seg" id="amc" role="radiogroup">
+              <button data-v="1" role="radio">Sec</button>
+              <button data-v="2" role="radio" class="on">Normal</button>
+              <button data-v="3" role="radio">Saturé</button>
+            </div>
+            <label>Type de sol dominant
+              <select id="soil">
+                <option value="1">Perméable (sables, éboulis, calcaires fissurés)</option>
+                <option value="2" selected>Moyen : argilo-calcaire (défaut Provence)</option>
+                <option value="3">Peu perméable (argiles, marnes, roche)</option>
+              </select>
+            </label>
+            <label class="check">
+              <input type="checkbox" id="basin-only" checked />
+              Pluie seulement sur le bassin versant de l'Arc
+            </label>
+          </section>
+
+          <section>
+            <h2>Calcul</h2>
+            <label>Zone
+              <select id="zone">
+                <option value="basin">Haute vallée de l'Arc (bassin entier)</option>
+                <option value="view">Zone affichée à l'écran (détail fin)</option>
+              </select>
+            </label>
+            <label>Résolution
+              <select id="res"></select>
+            </label>
+            <p id="res-info" class="hint"></p>
+            <label>Durée simulée après la fin de la pluie (h)
+              <input id="tail-h" type="number" inputmode="decimal" value="8" min="0" max="72" step="1" />
+            </label>
+            <details>
+              <summary>Options avancées</summary>
+              <label>Gravure du réseau BD TOPO dans le relief (m)
+                <input id="burn" type="number" inputmode="decimal" value="1" min="0" max="3" step="0.25" />
+              </label>
+              <label>Calage : multiplicateur de la rétention du sol
+                <input id="cnf" type="number" inputmode="decimal" value="1" min="0.2" max="3" step="0.1" />
+              </label>
+              <label>Moteur de calcul
+                <select id="engine">
+                  <option value="auto">Automatique</option>
+                  <option value="gpu">Carte graphique (WebGPU)</option>
+                  <option value="cpu">Processeur</option>
+                </select>
+              </label>
+              <p id="engine-info" class="hint"></p>
+              <button id="clear-cache" class="ghost">Vider le cache des données</button>
+            </details>
+            <button id="run" class="primary">Lancer la simulation</button>
+            <div id="progress" hidden>
+              <div class="bar"><span></span></div>
+              <p class="status"></p>
+            </div>
+          </section>
+
+          <section id="results" hidden>
+            <h2>Résultats</h2>
+            <div class="seg" id="view-mode" role="radiogroup">
+              <button data-v="t" class="on" role="radio">Heure par heure</button>
+              <button data-v="max" role="radio">Maximum atteint</button>
+            </div>
+            <div class="timeline">
+              <button id="play" class="icon" aria-label="Lecture">▶</button>
+              <input id="time" type="range" min="0" max="0" value="0" aria-label="Temps" />
+              <span id="time-label">0 h</span>
+            </div>
+            <label>Masquer l'eau en dessous de <span id="thr-label">10 cm</span>
+              <input id="thr" type="range" min="1" max="50" value="10" />
+            </label>
+            <div id="legend" class="legend"></div>
+            <h3>Débits aux points de suivi (m³/s)</h3>
+            <canvas id="hydro" class="chart" aria-label="Hydrogrammes"></canvas>
+            <div id="gauge-legend" class="legend gauges"></div>
+            <h3>Point de la carte</h3>
+            <p id="probe-info" class="hint">Touchez la carte pour connaître la hauteur d'eau en un point.</p>
+            <canvas id="probe-chart" class="chart small" hidden aria-label="Hauteur d'eau au point"></canvas>
+            <p id="summary" class="hint"></p>
+          </section>
+
+          <section>
+            <h2>Couches</h2>
+            <label class="check"><input type="checkbox" data-layer="water" checked /> Eau simulée</label>
+            <label class="check"><input type="checkbox" data-layer="rivers" checked /> Cours d'eau (BD TOPO)</label>
+            <label class="check"><input type="checkbox" data-layer="basin" checked /> Limite du bassin versant</label>
+            <label class="check"><input type="checkbox" data-layer="labels" checked /> Routes et noms de lieux</label>
+            <label class="check"><input type="checkbox" data-layer="shadow" /> Ombrage du relief</label>
+          </section>
+
+          <section class="about">
+            <h2>À savoir</h2>
+            <p>
+              Outil pédagogique et exploratoire. <strong>Il ne remplace ni le PPRI, ni Vigicrues, ni les
+              consignes des autorités.</strong> La pluie est supposée uniforme sur toute la zone, et les ouvrages
+              (buses, bassins de rétention, digues) ne sont représentés qu'à travers le relief.
+            </p>
+            <p>
+              Données IGN : relief LiDAR HD (MNT 0,5 m), occupation du sol COSIA, BD TOPO, BD ORTHO et Plan IGN.
+              Modèle : ruissellement SCS-CN, écoulement 2D « inertie locale » (Bates 2010, de Almeida 2012).
+            </p>
+          </section>
+        </div>
+      </aside>
+      <main id="map"></main>
+    </div>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

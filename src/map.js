@@ -1,0 +1,181 @@
+import maplibregl from 'maplibre-gl';
+import 'maplibre-gl/dist/maplibre-gl.css';
+import { ORTHO_TILES, SHADOW_TILES, PLAN_IGN_STYLE, DOMAIN } from './config.js';
+import { toWgs } from './geo.js';
+
+const EMPTY = { type: 'FeatureCollection', features: [] };
+
+// Couches du Plan IGN gardées pour l'effet « hybride » : routes, voies ferrées, noms.
+const ROAD_LAYERS = new Set([
+  'routier_route',
+  'routier_route_sup',
+  'routier_liaison',
+  'routier_chemin',
+  'ferre',
+  'ferre_sup',
+]);
+const isLabelLayer = (sl) =>
+  sl?.startsWith('toponyme_') && !sl.startsWith('toponyme_parcellaire') && sl !== 'toponyme_routier_borne';
+
+async function loadPlanIgnOverlay() {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await tryLoadPlanIgn();
+    } catch (e) {
+      console.warn('Plan IGN indisponible', e);
+      await new Promise((r) => setTimeout(r, 800 * 2 ** attempt));
+    }
+  }
+  return null;
+}
+
+async function tryLoadPlanIgn() {
+  {
+    const res = await fetch(PLAN_IGN_STYLE);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const style = await res.json();
+    const layers = style.layers.filter((l) => {
+      const sl = l['source-layer'];
+      if (l.type === 'line' && ROAD_LAYERS.has(sl)) return true;
+      if (l.type === 'symbol' && isLabelLayer(sl)) return true;
+      return false;
+    });
+    return { sources: style.sources, glyphs: style.glyphs, sprite: style.sprite, layers };
+  }
+}
+
+export async function createMap(container) {
+  const overlay = await loadPlanIgnOverlay();
+  const sw = toWgs(DOMAIN.xmin, DOMAIN.ymin);
+  const ne = toWgs(DOMAIN.xmax, DOMAIN.ymax);
+
+  const style = {
+    version: 8,
+    ...(overlay ? { glyphs: overlay.glyphs, sprite: overlay.sprite } : {}),
+    sources: {
+      ortho: {
+        type: 'raster',
+        tiles: [ORTHO_TILES],
+        tileSize: 256,
+        maxzoom: 19,
+        attribution: '© IGN – BD ORTHO, LiDAR HD, COSIA, BD TOPO, Plan IGN',
+      },
+      shadow: { type: 'raster', tiles: [SHADOW_TILES], tileSize: 256, maxzoom: 18 },
+      rivers: { type: 'geojson', data: EMPTY },
+      basin: { type: 'geojson', data: EMPTY },
+      gauges: { type: 'geojson', data: EMPTY },
+      probe: { type: 'geojson', data: EMPTY },
+      ...(overlay?.sources || {}),
+    },
+    layers: [
+      { id: 'ortho', type: 'raster', source: 'ortho' },
+      {
+        id: 'shadow',
+        type: 'raster',
+        source: 'shadow',
+        layout: { visibility: 'none' },
+        paint: { 'raster-opacity': 0.35 },
+      },
+      // La couche d'eau est insérée ici (avant 'rivers').
+      {
+        id: 'rivers',
+        type: 'line',
+        source: 'rivers',
+        paint: {
+          'line-color': ['case', ['==', ['get', 'name'], "l'Arc"], '#2fd0ff', '#7fe3ff'],
+          'line-width': ['interpolate', ['linear'], ['zoom'], 10, ['case', ['==', ['get', 'name'], "l'Arc"], 2, 0.6], 15, ['case', ['==', ['get', 'name'], "l'Arc"], 4, 1.6]],
+          'line-opacity': 0.75,
+        },
+      },
+      {
+        id: 'basin',
+        type: 'line',
+        source: 'basin',
+        paint: { 'line-color': '#ffd84d', 'line-width': 1.5, 'line-dasharray': [3, 2], 'line-opacity': 0.9 },
+      },
+      ...(overlay?.layers || []),
+      {
+        id: 'gauge-lines',
+        type: 'line',
+        source: 'gauges',
+        filter: ['==', ['geometry-type'], 'LineString'],
+        paint: { 'line-color': '#ff5a36', 'line-width': 3 },
+      },
+      // Étiquettes des points de suivi (nécessitent les polices du Plan IGN).
+      ...(overlay
+        ? [
+            {
+              id: 'gauge-labels',
+              type: 'symbol',
+              source: 'gauges',
+              filter: ['==', ['geometry-type'], 'Point'],
+              layout: {
+                'text-field': ['get', 'name'],
+                'text-font': ['Source Sans Pro Bold'],
+                'text-size': 12,
+                'text-offset': [0, 1.2],
+                'text-anchor': 'top',
+                'text-optional': true,
+              },
+              paint: { 'text-color': '#ff5a36', 'text-halo-color': '#fff', 'text-halo-width': 1.5 },
+            },
+          ]
+        : []),
+      {
+        id: 'probe',
+        type: 'circle',
+        source: 'probe',
+        paint: {
+          'circle-radius': 6,
+          'circle-color': '#ff2d55',
+          'circle-stroke-color': '#fff',
+          'circle-stroke-width': 2,
+        },
+      },
+    ],
+  };
+
+  const map = new maplibregl.Map({
+    container,
+    style,
+    bounds: [sw, ne],
+    fitBoundsOptions: { padding: 20 },
+    maxZoom: 19,
+    hash: true,
+    attributionControl: { compact: true },
+  });
+  map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
+  map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-right');
+  map.addControl(new maplibregl.GeolocateControl({ trackUserLocation: false }), 'top-right');
+  await new Promise((r) => (map.loaded() ? r() : map.once('load', r)));
+  return { map, overlayIds: (overlay?.layers || []).map((l) => l.id) };
+}
+
+/** Ajoute ou remplace la couche d'eau (canvas) positionnée sur la grille Lambert 93. */
+export function setWaterCanvas(map, canvas, corners) {
+  if (map.getLayer('water')) map.removeLayer('water');
+  if (map.getSource('water')) map.removeSource('water');
+  map.addSource('water', { type: 'canvas', canvas, coordinates: corners, animate: false });
+  map.addLayer(
+    {
+      id: 'water',
+      type: 'raster',
+      source: 'water',
+      paint: { 'raster-opacity': 1, 'raster-resampling': 'nearest', 'raster-fade-duration': 0 },
+    },
+    'rivers',
+  );
+}
+
+/** Force MapLibre à recharger la texture du canvas après un dessin. */
+export function refreshWater(map) {
+  const src = map.getSource('water');
+  if (!src) return;
+  src.play();
+  map.once('render', () => src.pause());
+  map.triggerRepaint();
+}
+
+export function setGeoJson(map, id, data) {
+  map.getSource(id)?.setData(data || EMPTY);
+}
