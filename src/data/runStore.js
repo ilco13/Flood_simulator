@@ -67,7 +67,7 @@ async function unpackDem(blob) {
  * Prépare un enregistrement à partir d'une simulation terminée.
  * @returns {{ meta, payload }} meta = petit résumé listable ; payload = données lourdes (Blobs)
  */
-export async function packRun({ name, params, grid, totalTime, tEnd, store, series, gauges, maxima, dem, outline, rivers, summary, warnings }) {
+export async function packRun({ name, params, grid, totalTime, tEnd, store, series, gauges, maxima, dem, zSim, outline, rivers, summary, warnings }) {
   const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
   const snaps = store.items.map((it) => ({ t: it.t, blob: toBlob(it.data) }));
   const payload = {
@@ -76,6 +76,8 @@ export async function packRun({ name, params, grid, totalTime, tEnd, store, seri
     tmax: await packFloat(maxima.tmax),
     vmax: await packFloat(maxima.vmax),
     dem: await packDem(dem),
+    // Terrain de la simulation (vallats gravés, cuvettes ouvertes) : sert aux coupes.
+    zsim: zSim ? await packDem(zSim) : null,
     json: {
       series,
       gauges: gauges.map((g) => ({ id: g.id, name: g.name, lineWgs: g.lineWgs })),
@@ -85,7 +87,7 @@ export async function packRun({ name, params, grid, totalTime, tEnd, store, seri
       warnings,
     },
   };
-  let size = payload.hmax.size + payload.tmax.size + payload.vmax.size + payload.dem.size;
+  let size = payload.hmax.size + payload.tmax.size + payload.vmax.size + payload.dem.size + (payload.zsim?.size || 0);
   for (const s of snaps) size += s.blob.size;
   const meta = {
     id,
@@ -144,6 +146,7 @@ export async function loadRun(id) {
       vmax: await unpackFloat(payload.vmax),
     },
     dem: await unpackDem(payload.dem),
+    z: payload.zsim ? await unpackDem(payload.zsim) : null,
     ...payload.json,
   };
 }
@@ -158,10 +161,18 @@ export async function exportRun(id) {
     tx(['meta'], 'readonly', (t) => t.objectStore('meta').get(id)),
     tx(['payload'], 'readonly', (t) => t.objectStore('payload').get(id)),
   ]);
-  const blobs = [payload.hmax, payload.tmax, payload.vmax, payload.dem, ...payload.snaps.map((s) => s.blob)];
+  const named = [
+    ['hmax', payload.hmax],
+    ['tmax', payload.tmax],
+    ['vmax', payload.vmax],
+    ['dem', payload.dem],
+    ...(payload.zsim ? [['zsim', payload.zsim]] : []),
+  ];
+  const blobs = [...named.map((x) => x[1]), ...payload.snaps.map((s) => s.blob)];
   const header = {
     meta,
     json: payload.json,
+    parts: named.map((x) => x[0]),
     snapTimes: payload.snaps.map((s) => s.t),
     sizes: blobs.map((b) => b.size),
   };
@@ -183,13 +194,16 @@ export async function importRun(file) {
     off += n;
     return b;
   });
-  const [hmax, tmax, vmax, dem, ...snapBlobs] = blobs;
+  const parts = header.parts || ['hmax', 'tmax', 'vmax', 'dem'];
+  const named = Object.fromEntries(parts.map((name, i) => [name, blobs[i]]));
+  const snapBlobs = blobs.slice(parts.length);
   const meta = { ...header.meta, id: `${Date.now().toString(36)}-imp`, imported: true };
   const payload = {
-    hmax,
-    tmax,
-    vmax,
-    dem,
+    hmax: named.hmax,
+    tmax: named.tmax,
+    vmax: named.vmax,
+    dem: named.dem,
+    zsim: named.zsim || null,
     snaps: header.snapTimes.map((t, i) => ({ t, blob: snapBlobs[i] })),
     json: header.json,
   };

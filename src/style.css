@@ -571,3 +571,42 @@ button.icon {
   font-size: 12.5px;
   border: 0;
 }
+
+/* Coupe en travers */
+.btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.btn-row button.ghost {
+  margin-top: 0;
+}
+.btn-row button.ghost.on {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+.btn-row button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.chart.section {
+  height: 260px;
+  border-radius: 8px;
+  cursor: crosshair;
+  touch-action: none;
+}
+.legend i.sw-water {
+  background: linear-gradient(#46a0eb, #0a3278);
+}
+.legend i.sw-max {
+  background: none;
+  border-top: 2px dashed #ff6a3d;
+  border-radius: 0;
+  height: 0;
+  vertical-align: 3px;
+}
+.legend i.sw-soil {
+  background: #b48a5c;
+  border-top: 3px solid #5f8f3a;
+}

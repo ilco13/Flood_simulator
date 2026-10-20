@@ -138,6 +138,28 @@
             <h3>Point de la carte</h3>
             <p id="probe-info" class="hint">Touchez la carte pour connaître la hauteur d'eau en un point.</p>
             <canvas id="probe-chart" class="chart small" hidden aria-label="Hauteur d'eau au point"></canvas>
+            <h3>Coupe en travers</h3>
+            <p id="section-hint" class="hint">Placez une coupe pour voir l'eau monter à un endroit précis.</p>
+            <div class="btn-row">
+              <button id="section-place" class="ghost" type="button">Placer une coupe</button>
+              <button id="section-auto" class="ghost" type="button" disabled>Orientation auto</button>
+              <button id="section-clear" class="ghost" type="button" disabled>Effacer</button>
+            </div>
+            <div id="section-ctrl" hidden>
+              <label>Orientation <span id="sec-angle-label">90°</span>
+                <input id="sec-angle" type="range" min="0" max="179" value="90" />
+              </label>
+              <label>Largeur <span id="sec-width-label">150 m</span>
+                <input id="sec-width" type="range" min="20" max="2000" step="10" value="150" />
+              </label>
+              <canvas id="section-canvas" class="chart section" aria-label="Coupe en travers"></canvas>
+              <p id="section-info" class="hint">Survolez la coupe pour lire les hauteurs.</p>
+              <div class="legend">
+                <span><i class="sw-water"></i>Eau à l'instant affiché</span>
+                <span><i class="sw-max"></i>Niveau maximal atteint</span>
+                <span><i class="sw-soil"></i>Terrain LiDAR HD</span>
+              </div>
+            </div>
             <p id="summary" class="hint"></p>
           </section>
 

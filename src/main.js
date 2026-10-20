@@ -1,5 +1,5 @@
 import { DOMAIN, OUTLET, GAUGES, RESOLUTIONS } from './config.js';
-import { makeGrid, toL93, cellOf, gridCornersWgs } from './geo.js';
+import { makeGrid, toL93, toWgs, cellOf, gridCornersWgs } from './geo.js';
 import { createMap, setWaterCanvas, refreshWater, setGeoJson } from './map.js';
 import { SHAPES, makeHyetograph } from './hydrology/rain.js';
 import { buildModel } from './sim/model.js';
@@ -15,6 +15,7 @@ import { setTerrain3d, setExaggeration, Toggle3dControl } from './terrain3d.js';
 import { Water3DLayer } from './render/water3d.js';
 import { packRun, saveRun, listRuns, loadRun, deleteRun, renameRun, exportRun, importRun, formatSize } from './data/runStore.js';
 import { fitBoundsOf } from './map.js';
+import { sectionEnds, autoOrientation, fetchFineProfile, sampleSection, drawSection } from './ui/section.js';
 
 const $ = (id) => document.getElementById(id);
 const GPU_CELL_CAP = 16e6;
@@ -251,6 +252,7 @@ function setupUi() {
     if (state.is3d) setExaggeration(state.map, Number($('exag').value));
   });
   $('play').onclick = togglePlay;
+  setupSection();
   $('import-file').addEventListener('change', async (e) => {
     const f = e.target.files[0];
     e.target.value = '';
@@ -709,6 +711,8 @@ function drawQuantized(q, t) {
   run.water.draw(q, state.lut);
   refreshWater(state.map);
   state.lastQ = q;
+  state.cursorT = t;
+  redrawSection();
   if (state.is3d) {
     ensureWater3d();
     state.water3d.setDepth(q);
@@ -854,6 +858,158 @@ async function probeAt(lngLat) {
   }
 }
 
+/* ---------- Coupe en travers ---------- */
+
+function setupSection() {
+  $('section-place').onclick = () => {
+    state.sectionMode = !state.sectionMode;
+    $('section-place').classList.toggle('on', state.sectionMode);
+    if (state.map) state.map.getCanvas().style.cursor = state.sectionMode ? 'crosshair' : '';
+    $('section-hint').textContent = state.sectionMode
+      ? 'Cliquez sur la carte au centre de la coupe (par exemple dans le lit du vallat).'
+      : 'Placez une coupe pour voir l\'eau monter à un endroit précis.';
+    if (state.sectionMode && window.matchMedia('(max-width: 760px)').matches) $('panel').classList.add('collapsed');
+  };
+  $('section-auto').onclick = () => {
+    const sec = state.section;
+    if (!sec || !state.data) return;
+    sec.angle = autoOrientation(state.data.grid || state.run.grid, state.data.z || state.data.dem, sec.cx, sec.cy, sec.width);
+    $('sec-angle').value = sec.angle;
+    updateSection();
+  };
+  $('section-clear').onclick = () => {
+    state.section = null;
+    setGeoJson(state.map, 'section', null);
+    setGeoJson(state.map, 'section-hover', null);
+    $('section-ctrl').hidden = true;
+    $('section-auto').disabled = true;
+    $('section-clear').disabled = true;
+  };
+  $('sec-angle').addEventListener('input', () => {
+    if (!state.section) return;
+    state.section.angle = Number($('sec-angle').value);
+    updateSection();
+  });
+  $('sec-width').addEventListener('input', () => {
+    if (!state.section) return;
+    state.section.width = Number($('sec-width').value);
+    updateSection();
+  });
+  const cv = $('section-canvas');
+  const hover = (clientX) => {
+    const sec = state.section;
+    if (!sec?.helper) return;
+    const r = cv.getBoundingClientRect();
+    sec.hover = sec.helper.indexAt(clientX - r.left);
+    const inf = sec.helper.info(sec.hover);
+    const fmtD = (h) => (h < 1 ? `${Math.round(h * 100)} cm` : `${h.toFixed(2).replace('.', ',')} m`);
+    $('section-info').innerHTML =
+      `À ${Math.round(inf.d)} m de A : sol à <strong>${Number.isFinite(inf.ground) ? inf.ground.toFixed(2).replace('.', ',') : '–'} m</strong>` +
+      ` · eau ${inf.depth > 0.01 ? `<strong>${fmtD(inf.depth)}</strong>` : 'aucune'}` +
+      (inf.maxDepth > 0.01 ? ` · max ${fmtD(inf.maxDepth)}` : '');
+    setGeoJson(state.map, 'section-hover', {
+      type: 'FeatureCollection',
+      features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: inf.lngLat }, properties: {} }],
+    });
+    redrawSection(false);
+  };
+  cv.addEventListener('mousemove', (e) => hover(e.clientX));
+  cv.addEventListener('touchmove', (e) => {
+    hover(e.touches[0].clientX);
+    e.preventDefault();
+  }, { passive: false });
+  cv.addEventListener('touchstart', (e) => hover(e.touches[0].clientX), { passive: true });
+  cv.addEventListener('mouseleave', () => {
+    if (!state.section) return;
+    state.section.hover = null;
+    setGeoJson(state.map, 'section-hover', null);
+    redrawSection(false);
+  });
+  window.addEventListener('resize', () => redrawSection(false));
+}
+
+function placeSection(lngLat) {
+  state.sectionMode = false;
+  $('section-place').classList.remove('on');
+  state.map.getCanvas().style.cursor = '';
+  const [cx, cy] = toL93(lngLat.lng, lngLat.lat);
+  const width = Number($('sec-width').value);
+  const first = !state.section;
+  state.section = { cx, cy, width, angle: Number($('sec-angle').value), fine: null };
+  // Première coupe : orientation automatique en travers du vallon
+  if (first && state.data) {
+    state.section.angle = autoOrientation(state.run?.grid || state.data.grid, state.data.z || state.data.dem, cx, cy, width);
+    $('sec-angle').value = state.section.angle;
+  }
+  $('section-ctrl').hidden = false;
+  $('section-auto').disabled = false;
+  $('section-clear').disabled = false;
+  $('section-hint').textContent = 'Réglez l\'orientation et la largeur ; la coupe suit le curseur de temps.';
+  if (window.matchMedia('(max-width: 760px)').matches) $('panel').classList.remove('collapsed');
+  updateSection();
+  $('section-ctrl').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+let fineTimer = null;
+function updateSection() {
+  const sec = state.section;
+  if (!sec) return;
+  $('sec-angle-label').textContent = `${sec.angle}°`;
+  $('sec-width-label').textContent = sec.width >= 1000 ? `${(sec.width / 1000).toFixed(2).replace('.', ',')} km` : `${sec.width} m`;
+  const { A, B } = sectionEnds(sec.cx, sec.cy, sec.angle, sec.width);
+  sec.A = A;
+  sec.B = B;
+  sec.n = Math.min(1500, Math.max(200, Math.round(sec.width / 0.5)));
+  sec.fine = null;
+  const a = toWgs(...A);
+  const b = toWgs(...B);
+  setGeoJson(state.map, 'section', {
+    type: 'FeatureCollection',
+    features: [
+      { type: 'Feature', geometry: { type: 'LineString', coordinates: [a, b] }, properties: {} },
+      { type: 'Feature', geometry: { type: 'Point', coordinates: a }, properties: { end: 'A' } },
+      { type: 'Feature', geometry: { type: 'Point', coordinates: b }, properties: { end: 'B' } },
+    ],
+  });
+  redrawSection();
+  // Profil LiDAR fin, chargé après un court délai (réglages en cours)
+  clearTimeout(fineTimer);
+  const key = `${A},${B},${sec.n}`;
+  sec.key = key;
+  fineTimer = setTimeout(async () => {
+    try {
+      const { z } = await fetchFineProfile(A, B, sec.n);
+      if (state.section?.key !== key) return;
+      state.section.fine = z;
+      redrawSection();
+    } catch (e) {
+      console.warn('Profil LiDAR fin indisponible', e);
+    }
+  }, 350);
+}
+
+function redrawSection(resample = true) {
+  const sec = state.section;
+  const run = state.run;
+  if (!sec || !run || !state.data || !state.lastQ) return;
+  const grid = run.grid;
+  const zSim = state.data.z || state.data.dem;
+  if (resample || !sec.sample) {
+    const q = state.lastQ;
+    sec.sample = sampleSection({
+      grid,
+      zSim,
+      A: sec.A,
+      B: sec.B,
+      n: sec.n,
+      depthAt: (k) => dequantize(q[k]),
+      maxAt: (k) => (run.maxima ? run.maxima.hmax[k] : 0),
+    });
+  }
+  const timeLabel = state.viewMode === 'max' || state.cursorT == null ? 'Maximum atteint' : `À ${fmtH(state.cursorT)}`;
+  sec.helper = drawSection($('section-canvas'), { ...sec.sample, fine: sec.fine, timeLabel, hover: sec.hover, cell: grid.dx });
+}
+
 /* ---------- Simulations enregistrées ---------- */
 
 const AMC_LABEL = { 1: 'sol sec', 2: 'sol normal', 3: 'sol saturé' };
@@ -890,6 +1046,7 @@ async function autoSave(run, partial) {
       gauges: run.gauges,
       maxima: run.maxima,
       dem: state.data.dem,
+      zSim: state.data.z,
       outline: state.data.outline,
       rivers: state.data.rivers,
       summary: $('summary').innerHTML,
@@ -985,6 +1142,7 @@ async function openSaved(id) {
       key: `enregistrée:${id}`,
       grid,
       dem: r.dem,
+      z: r.z,
       gauges: r.gauges,
       outline: r.outline,
       rivers: r.rivers,
@@ -1090,7 +1248,10 @@ async function main() {
   state.map.on('moveend', () => {
     if (params().zone === 'view') describeRes();
   });
-  state.map.on('click', (e) => probeAt(e.lngLat));
+  state.map.on('click', (e) => {
+    if (state.sectionMode) placeSection(e.lngLat);
+    else probeAt(e.lngLat);
+  });
   // Accès à l'état depuis la console du navigateur (diagnostic).
   window.floodApp = state;
   state.water3d = new Water3DLayer();

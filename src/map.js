@@ -65,6 +65,8 @@ export async function createMap(container) {
       basin: { type: 'geojson', data: EMPTY },
       gauges: { type: 'geojson', data: EMPTY },
       probe: { type: 'geojson', data: EMPTY },
+      section: { type: 'geojson', data: EMPTY },
+      'section-hover': { type: 'geojson', data: EMPTY },
       ...(overlay?.sources || {}),
     },
     layers: [
@@ -121,6 +123,58 @@ export async function createMap(container) {
             },
           ]
         : []),
+      {
+        id: 'section-casing',
+        type: 'line',
+        source: 'section',
+        filter: ['==', ['geometry-type'], 'LineString'],
+        layout: { 'line-cap': 'round' },
+        paint: { 'line-color': '#ffffff', 'line-width': 7, 'line-opacity': 0.9 },
+      },
+      {
+        id: 'section-line',
+        type: 'line',
+        source: 'section',
+        filter: ['==', ['geometry-type'], 'LineString'],
+        layout: { 'line-cap': 'round' },
+        paint: { 'line-color': '#ff6a3d', 'line-width': 3.5 },
+      },
+      {
+        id: 'section-ends',
+        type: 'circle',
+        source: 'section',
+        filter: ['==', ['geometry-type'], 'Point'],
+        paint: {
+          'circle-radius': 7,
+          'circle-color': ['case', ['==', ['get', 'end'], 'A'], '#ff6a3d', '#ffffff'],
+          'circle-stroke-color': '#ff6a3d',
+          'circle-stroke-width': 3,
+        },
+      },
+      ...(overlay
+        ? [
+            {
+              id: 'section-labels',
+              type: 'symbol',
+              source: 'section',
+              filter: ['==', ['geometry-type'], 'Point'],
+              layout: {
+                'text-field': ['get', 'end'],
+                'text-font': ['Source Sans Pro Bold'],
+                'text-size': 14,
+                'text-offset': [0, -1.3],
+                'text-allow-overlap': true,
+              },
+              paint: { 'text-color': '#ff6a3d', 'text-halo-color': '#fff', 'text-halo-width': 2 },
+            },
+          ]
+        : []),
+      {
+        id: 'section-hover',
+        type: 'circle',
+        source: 'section-hover',
+        paint: { 'circle-radius': 5, 'circle-color': '#0b2540', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 },
+      },
       {
         id: 'probe',
         type: 'circle',

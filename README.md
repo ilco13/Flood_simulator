@@ -17,6 +17,7 @@ Application web qui simule la montée des eaux dans la **haute vallée de l'Arc*
    - vue « maximum atteint » ;
    - débits aux points de suivi (Arc à Trets, Rousset, Châteauneuf, Meyreuil, Aix ; Verdalaï, Longarel, Bayeux, Cause) ;
    - en touchant la carte : hauteur d'eau, maximum, heure du pic et vitesse en ce point ;
+   - **coupe en travers** : « Placer une coupe » puis clic sur la carte ; orientation (auto = perpendiculaire au vallon) et largeur réglables. Le terrain est tiré du LiDAR HD à pleine résolution (jusqu'à 0,5 m), l'eau suit le curseur de temps, le niveau maximal est en pointillé, et le survol donne altitude et hauteur d'eau ;
    - **simulations enregistrées** : chaque simulation terminée est enregistrée automatiquement dans le navigateur (IndexedDB) et peut être rouverte sans recalcul, renommée, supprimée, ou exportée en fichier `.crue` pour l'ouvrir sur un autre ordinateur (bouton « Importer un fichier .crue ») ;
    - **vue 3D** (bouton « 3D » de la carte ou case « Relief 3D ») : relief LiDAR HD en relief, photo aérienne drapée, et nappe d'eau en volume posée à la cote « sol + hauteur d'eau », animée avec le curseur de temps. Exagération du relief réglable (×1 à ×4).
 
