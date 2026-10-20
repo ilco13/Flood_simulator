@@ -139,7 +139,12 @@ export async function createMap(container) {
     container,
     style,
     bounds: [sw, ne],
-    fitBoundsOptions: { padding: 20 },
+    // Sur téléphone, le panneau couvre le bas de l'écran (58 %) : on cadre au-dessus.
+    fitBoundsOptions: {
+      padding: window.matchMedia('(max-width: 760px)').matches
+        ? { top: 20, left: 20, right: 20, bottom: Math.round(window.innerHeight * 0.58) + 20 }
+        : 20,
+    },
     maxZoom: 19,
     hash: true,
     attributionControl: { compact: true },
