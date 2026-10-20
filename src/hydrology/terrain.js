@@ -8,7 +8,7 @@
 
 class MinHeap {
   constructor(capacity) {
-    this.keys = new Float64Array(capacity);
+    this.keys = new Float32Array(capacity); // altitudes en float32 : pas besoin de plus
     this.vals = new Int32Array(capacity);
     this.size = 0;
   }

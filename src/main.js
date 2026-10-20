@@ -392,6 +392,27 @@ const prog = {
 
 /* ---------- Données ---------- */
 
+/**
+ * Explique l'échec d'un worker. Sans message, c'est soit une page ouverte avant une mise à jour
+ * du site (les fichiers ont changé de nom), soit un arrêt du navigateur (mémoire).
+ */
+async function workerFailure(e, what) {
+  if (e?.message) return e.message;
+  try {
+    const r = await fetch(new URL('./', location.href), { cache: 'no-store' });
+    const html = await r.text();
+    const current = [...document.scripts].map((x) => x.src).find((src) => /assets\/index-/.test(src));
+    const name = current && current.split('/').pop();
+    if (name && !html.includes(name)) {
+      return "L'application a été mise à jour pendant que la page était ouverte : rechargez la page (Ctrl+F5 ou Cmd+Maj+R).";
+    }
+  } catch {
+    // hors ligne : on retombe sur le message général
+  }
+  return `Le navigateur a interrompu ${what}, probablement faute de mémoire. Essayez une résolution plus grossière ou une zone plus petite, puis rechargez la page.`;
+}
+
+
 function loadData(grid, p) {
   const key = JSON.stringify([grid.xmin, grid.ymin, grid.nx, grid.ny, grid.dx, p.burn]);
   if (state.data?.key === key) return Promise.resolve(state.data);
@@ -412,9 +433,10 @@ function loadData(grid, p) {
         reject(new Error(m.message));
       }
     };
-    w.onerror = (e) => {
+    w.onerror = async (e) => {
       w.terminate();
-      reject(new Error(e.message || 'Erreur du worker de préparation'));
+      state.prepWorker = null;
+      reject(new Error(await workerFailure(e, 'la préparation des données')));
     };
     const outlet = p.zone === 'basin' ? OUTLET : null;
     w.postMessage({ grid, burnDepth: p.burn, outlet, gauges: GAUGES });
@@ -600,7 +622,10 @@ function runCpu(run, model, p, totalTime, snapshotEvery, cb) {
         reject(new Error(m.message));
       }
     };
-    w.onerror = (e) => reject(new Error(e.message || 'Erreur du calcul CPU'));
+    w.onerror = async (e) => {
+      w.terminate();
+      reject(new Error(await workerFailure(e, 'le calcul')));
+    };
     w.postMessage({
       type: 'run',
       model,
