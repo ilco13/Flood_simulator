@@ -849,6 +849,16 @@ async function main() {
   $('engine-info').textContent = gpu
     ? `Carte graphique détectée${gpu.label ? ` : ${gpu.label}` : ''}.`
     : 'WebGPU indisponible dans ce navigateur : calcul sur le processeur (plus lent, résolution plus grossière).';
+  // Portable à deux GPU : Chrome sous Windows ignore la préférence « haute performance »
+  // et prend souvent la puce intégrée. On explique comment forcer la carte dédiée.
+  if (gpu && /intel/i.test(gpu.label) && /win/i.test(navigator.platform || navigator.userAgent)) {
+    $('engine-info').innerHTML +=
+      '<br><span class="warn">C\'est la puce graphique intégrée Intel.</span> Si l\'ordinateur a aussi une carte ' +
+      'NVIDIA ou AMD : Paramètres Windows → Système → Écran → Graphiques → Google Chrome → Options → ' +
+      '« Performances élevées », puis redémarrez Chrome (ou activez chrome://flags/#force-high-performance-gpu).';
+    const det = document.querySelector('details');
+    if (det) det.open = true;
+  }
   updateResInfo();
   state.map.on('moveend', () => {
     if (params().zone === 'view') describeRes();
