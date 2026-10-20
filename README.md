@@ -6,12 +6,14 @@ Application web qui simule la montée des eaux dans la **haute vallée de l'Arc*
 
 ## Utilisation
 
+Le champ en haut du panneau cherche un lieu, une adresse ou un cours d'eau (géocodage IGN) et y centre la carte.
+
 1. Saisir le **cumul de pluie** (mm) et la **durée** (h), puis choisir la répartition dans le temps.
 2. Choisir l'**humidité du sol** avant l'épisode (sec, normal ou saturé) et le type de sol.
 3. Choisir la **zone** :
    - *Haute vallée de l'Arc* : tout le bassin, de Pourrières à Aix (Pont de l'Arc), à 50, 25, 15, 10 ou 5 m ;
    - *Zone affichée* : la portion visible de la carte, en détail fin (jusqu'à 1 m). L'eau venant de l'amont hors écran n'y est pas comptée. Pour savoir jusqu'où dézoomer, **« Choisir le point étudié »** puis un clic dans le lit du cours d'eau : l'application trace tout le **bassin versant amont** de ce point (contour orange, surface en km²), indique quelle part en couvre la zone affichée, et **« Cadrer sur son bassin »** ajuste la carte (et la maille si besoin). La simulation ajoute alors un point de suivi « Point étudié ».
-   - *Pluie seulement sur le bassin versant étudié* : la pluie ne tombe que sur les terrains qui s'écoulent vers l'exutoire (l'Arc à Aix en bassin entier, le point étudié en zone affichée).
+   - La pluie ne tombe que sur les terrains qui s'écoulent vers l'exutoire : l'Arc à Aix en bassin entier, le point étudié en zone affichée (toute la zone si aucun point n'est choisi).
 4. **Lancer la simulation**. L'eau apparaît au fil du calcul.
 5. Explorer les résultats :
    - curseur temporel et lecture animée ;

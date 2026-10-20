@@ -17,9 +17,10 @@
       <aside id="panel" aria-label="Paramètres de simulation">
         <header class="panel-head">
           <button id="panel-toggle" class="handle" aria-label="Replier le panneau"></button>
-          <div>
-            <h1>Crue de l'Arc</h1>
-            <p class="sub">Simulateur d'inondation · haute vallée de l'Arc</p>
+          <div class="search" role="search">
+            <input id="place-search" type="search" placeholder="Chercher un lieu, une adresse, un vallat…"
+              autocomplete="off" enterkeyhint="search" aria-label="Chercher un lieu" />
+            <ul id="place-results" class="place-results" hidden></ul>
           </div>
         </header>
 
@@ -60,15 +61,6 @@
                 <option value="3">Peu perméable (argiles, marnes, roche)</option>
               </select>
             </label>
-            <label class="check">
-              <input type="checkbox" id="basin-only" checked />
-              Pluie seulement sur le bassin versant étudié
-            </label>
-            <p class="hint">
-              La pluie ne tombe que sur les terrains qui s'écoulent vers l'exutoire étudié : l'Arc à Aix pour le
-              bassin entier, ou le point choisi en mode « zone affichée ». Ailleurs, elle partirait vers d'autres
-              bassins et ne ferait que gonfler les bords de la carte.
-            </p>
           </section>
 
           <section>
@@ -79,6 +71,7 @@
                 <option value="view">Zone affichée à l'écran (détail fin)</option>
               </select>
             </label>
+            <p id="zone-hint" class="hint"></p>
             <div id="catch-box" hidden>
               <p class="hint">
                 Choisissez le point à étudier (dans le lit du vallat) : l'application trace tout le bassin versant

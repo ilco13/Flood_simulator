@@ -1,3 +1,4 @@
+import maplibregl from 'maplibre-gl';
 import { DOMAIN, OUTLET, GAUGES, RESOLUTIONS } from './config.js';
 import { makeGrid, toL93, toWgs, cellOf, gridCornersWgs } from './geo.js';
 import { createMap, setWaterCanvas, refreshWater, setGeoJson } from './map.js';
@@ -56,7 +57,6 @@ function params() {
     shape: $('rain-shape').value,
     amc: state.amc,
     soil: Number($('soil').value),
-    basinOnly: $('basin-only').checked,
     zone: $('zone').value,
     res: Number($('res').value),
     tailH: Math.max(0, Number($('tail-h').value) || 0),
@@ -255,6 +255,7 @@ function setupUi() {
   $('play').onclick = togglePlay;
   setupSection();
   setupCatchment();
+  setupSearch();
   $('import-file').addEventListener('change', async (e) => {
     const f = e.target.files[0];
     e.target.value = '';
@@ -548,7 +549,7 @@ async function startRun() {
       spc: data.spc,
       soilGroup: p.soil,
       amc: p.amc,
-      rainOnBasinOnly: p.basinOnly && !!data.mask,
+      rainOnBasinOnly: !!data.mask,
       cnFactor: p.cnFactor,
     });
     run.gauges = data.gauges;
@@ -911,6 +912,96 @@ function setupMapTip() {
   state.map.on('movestart', () => (tip.hidden = true));
 }
 
+/* ---------- Recherche de lieu (géocodage IGN) ---------- */
+
+function setupSearch() {
+  const input = $('place-search');
+  const list = $('place-results');
+  let timer = null;
+  let ctrl = null;
+  let items = [];
+  let active = -1;
+  input.closest('.search').addEventListener('click', (e) => e.stopPropagation());
+  const close = () => {
+    list.hidden = true;
+    active = -1;
+  };
+  const render = () => {
+    list.innerHTML = '';
+    items.forEach((r, i) => {
+      const li = document.createElement('li');
+      li.className = i === active ? 'on' : '';
+      const kind = r.country === 'PositionOfInterest' ? (r.poiType?.[0] || r.kind || '') : r.kind === 'street' ? 'voie' : 'adresse';
+      li.innerHTML = `<span></span><small></small>`;
+      li.firstChild.textContent = r.fulltext;
+      li.lastChild.textContent = kind;
+      li.onmousedown = (e) => {
+        e.preventDefault();
+        choose(r);
+      };
+      list.appendChild(li);
+    });
+    list.hidden = !items.length;
+  };
+  const choose = (r) => {
+    input.value = r.fulltext;
+    close();
+    input.blur();
+    const poi = r.country === 'PositionOfInterest';
+    const big = poi && /commune|ville|village/i.test((r.poiType || []).join(' '));
+    state.map.flyTo({ center: [r.x, r.y], zoom: big ? 13 : 15.5, duration: 1200 });
+    if (!state.searchMarker) {
+      const el = document.createElement('div');
+      el.className = 'search-pin';
+      state.searchMarker = new maplibregl.Marker({ element: el, anchor: 'bottom' });
+    }
+    state.searchMarker.setLngLat([r.x, r.y]).addTo(state.map);
+    if (window.matchMedia('(max-width: 760px)').matches) $('panel').classList.add('collapsed');
+  };
+  const search = async (text) => {
+    ctrl?.abort();
+    ctrl = new AbortController();
+    const q = new URLSearchParams({
+      text,
+      type: 'PositionOfInterest,StreetAddress',
+      maximumResponses: '7',
+      lonlat: '5.6,43.47', // priorité aux résultats proches de la vallée de l'Arc
+    });
+    try {
+      const res = await fetch(`https://data.geopf.fr/geocodage/completion?${q}`, { signal: ctrl.signal });
+      const json = await res.json();
+      items = (json.results || []).filter((r) => Number.isFinite(r.x) && Number.isFinite(r.y));
+      active = -1;
+      render();
+    } catch (e) {
+      if (e.name !== 'AbortError') console.warn('Recherche de lieu indisponible', e);
+    }
+  };
+  input.addEventListener('input', () => {
+    clearTimeout(timer);
+    const t = input.value.trim();
+    if (t.length < 3) {
+      items = [];
+      close();
+      return;
+    }
+    timer = setTimeout(() => search(t), 250);
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (!items.length) return;
+      e.preventDefault();
+      active = (active + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length;
+      render();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (items.length) choose(items[Math.max(0, active)]);
+    } else if (e.key === 'Escape') close();
+  });
+  input.addEventListener('blur', () => setTimeout(close, 150));
+  input.addEventListener('focus', () => items.length && render());
+}
+
 /* ---------- Bassin versant du point étudié (mode zone affichée) ---------- */
 
 const CATCH_KEY = 'flood-sim-catchment';
@@ -922,7 +1013,15 @@ function studyGauge(c) {
 }
 
 function setupCatchment() {
-  const sync = () => ($('catch-box').hidden = params().zone !== 'view');
+  const sync = () => {
+    const view = params().zone === 'view';
+    $('catch-box').hidden = !view;
+    $('zone-hint').textContent = view
+      ? "Simulation fine de la partie visible de la carte. Choisissez le point étudié pour savoir jusqu'où " +
+        "dézoomer : la pluie ne tombe alors que sur son bassin versant (sinon sur toute la zone)."
+      : "Tout le bassin de l'Arc jusqu'à Aix (Pont de l'Arc) avec ses affluents, à 50–5 m : pluie sur " +
+        "l'ensemble du bassin, débits suivis le long de l'Arc et des principaux vallats.";
+  };
   $('zone').addEventListener('input', sync);
   sync();
   $('catch-pick').onclick = () => setCatchMode(!state.catchMode);
@@ -1080,7 +1179,7 @@ function describeCatchment() {
       txt +=
         ' <span class="warn">Bassin trop grand pour le mode zone affichée sur cet appareil : ' +
         'choisissez « Haute vallée de l\'Arc (bassin entier) ».</span>';
-    if (p.basinOnly) txt += ' La pluie ne tombera que sur ce bassin.';
+    txt += ' La pluie ne tombera que sur ce bassin.';
   }
   info.innerHTML = txt;
 }
