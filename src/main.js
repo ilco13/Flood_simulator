@@ -1341,10 +1341,12 @@ function setupSection() {
     if (!sec || !state.data) return;
     sec.angle = autoOrientation(state.data.grid || state.run.grid, state.data.z || state.data.dem, sec.cx, sec.cy, sec.width);
     $('sec-angle').value = sec.angle;
+    rebaseSection();
     updateSection();
   };
   $('section-clear').onclick = () => {
     state.section = null;
+    state.sectionHandle?.remove();
     setGeoJson(state.map, 'section', null);
     setGeoJson(state.map, 'section-hover', null);
     $('section-dock').hidden = true;
@@ -1354,11 +1356,23 @@ function setupSection() {
   $('sec-angle').addEventListener('input', () => {
     if (!state.section) return;
     state.section.angle = Number($('sec-angle').value);
+    rebaseSection();
     updateSection();
   });
   $('sec-width').addEventListener('input', () => {
     if (!state.section) return;
     state.section.width = Number($('sec-width').value);
+    updateSection();
+  });
+  // Avancer / reculer : translation perpendiculaire à la coupe (le long du cours d'eau),
+  // mesurée depuis la dernière position posée ou glissée.
+  $('sec-shift').addEventListener('input', () => {
+    const sec = state.section;
+    if (!sec) return;
+    const d = Number($('sec-shift').value);
+    const [px, py] = shiftAxis(sec.angle);
+    sec.cx = sec.bx + px * d;
+    sec.cy = sec.by + py * d;
     updateSection();
   });
   $('dock-close').onclick = () => $('section-clear').click();
@@ -1417,6 +1431,46 @@ function syncDock() {
   $('dock-play').textContent = $('play').textContent;
 }
 
+/** Direction (vecteur unitaire L93) du curseur « avancer / reculer » : perpendiculaire à la coupe. */
+function shiftAxis(angleDeg) {
+  const a = (angleDeg * Math.PI) / 180;
+  return [Math.cos(a), -Math.sin(a)];
+}
+
+/** Nouvelle origine du curseur « avancer / reculer » (après un glisser ou une rotation). */
+function rebaseSection() {
+  const sec = state.section;
+  if (!sec) return;
+  sec.bx = sec.cx;
+  sec.by = sec.cy;
+  $('sec-shift').value = 0;
+}
+
+/** Poignée « main » au centre de la coupe : la glisser déplace la coupe sans la modifier. */
+function sectionHandle() {
+  if (state.sectionHandle) return state.sectionHandle;
+  const el = document.createElement('div');
+  el.className = 'section-handle';
+  el.title = 'Glisser pour déplacer la coupe';
+  el.innerHTML =
+    '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M18 11V6a2 2 0 0 0-4 0v1M14 10V4a2 2 0 0 0-4 0v2M10 10.5V6a2 2 0 0 0-4 0v8"/>' +
+    '<path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>';
+  const m = new maplibregl.Marker({ element: el, draggable: true });
+  let raf = 0;
+  m.on('drag', () => {
+    const sec = state.section;
+    if (!sec) return;
+    const ll = m.getLngLat();
+    [sec.cx, sec.cy] = toL93(ll.lng, ll.lat);
+    rebaseSection();
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(() => updateSection({ fromHandle: true }));
+  });
+  state.sectionHandle = m;
+  return m;
+}
+
 function placeSection(lngLat) {
   state.sectionMode = false;
   $('section-place').classList.remove('on');
@@ -1424,7 +1478,8 @@ function placeSection(lngLat) {
   const [cx, cy] = toL93(lngLat.lng, lngLat.lat);
   const width = Number($('sec-width').value);
   const first = !state.section;
-  state.section = { cx, cy, width, angle: Number($('sec-angle').value), fine: null };
+  state.section = { cx, cy, bx: cx, by: cy, width, angle: Number($('sec-angle').value), fine: null };
+  $('sec-shift').value = 0;
   // Première coupe : orientation automatique en travers du vallon
   if (first && state.data) {
     state.section.angle = autoOrientation(state.run?.grid || state.data.grid, state.data.z || state.data.dem, cx, cy, width);
@@ -1441,10 +1496,17 @@ function placeSection(lngLat) {
 }
 
 let fineTimer = null;
-function updateSection() {
+function updateSection({ fromHandle = false } = {}) {
   const sec = state.section;
   if (!sec) return;
   $('sec-angle-label').textContent = `${sec.angle}°`;
+  const shift = Number($('sec-shift').value);
+  const [px, py] = shiftAxis(sec.angle);
+  const dir = ['le nord', 'le nord-est', "l'est", 'le sud-est', 'le sud', 'le sud-ouest', "l'ouest", 'le nord-ouest'][
+    Math.round(((((Math.atan2(px * Math.sign(shift || 1), py * Math.sign(shift || 1)) * 180) / Math.PI) + 360) % 360) / 45) % 8
+  ];
+  $('sec-shift-label').textContent = shift ? `${Math.abs(shift)} m vers ${dir}` : '0 m';
+  if (!fromHandle) sectionHandle().setLngLat(toWgs(sec.cx, sec.cy)).addTo(state.map);
   $('sec-width-label').textContent = sec.width >= 1000 ? `${(sec.width / 1000).toFixed(2).replace('.', ',')} km` : `${sec.width} m`;
   const { A, B } = sectionEnds(sec.cx, sec.cy, sec.angle, sec.width);
   sec.A = A;

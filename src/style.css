@@ -855,3 +855,21 @@ button.icon.sm {
 .catch-list em.muted {
   color: var(--muted);
 }
+
+/* Poignée de déplacement de la coupe */
+.section-handle {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #fff;
+  color: #ff6a3d;
+  border: 3px solid #ff6a3d;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  display: grid;
+  place-items: center;
+  cursor: grab;
+  touch-action: none;
+}
+.section-handle:active {
+  cursor: grabbing;
+}
