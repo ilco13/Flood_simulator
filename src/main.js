@@ -717,8 +717,8 @@ async function startRun() {
     run.series = data.gauges.map(() => [[0, 0]]);
 
     // Couche d'eau
-    run.water = new WaterCanvas(grid.nx, grid.ny);
-    setWaterCanvas(state.map, run.water.canvas, gridCornersWgs(grid));
+    run.water = new WaterCanvas(grid, toWgs, toL93);
+    setWaterCanvas(state.map, run.water.canvas, run.water.corners);
     setLayerVisible('water', document.querySelector('[data-layer=water]').checked);
     state.water3dGrid = null;
     state.lastQ = null;
@@ -2190,8 +2190,8 @@ async function openSaved(id) {
       t0: performance.now(),
     };
     state.run = run;
-    run.water = new WaterCanvas(grid.nx, grid.ny);
-    setWaterCanvas(state.map, run.water.canvas, gridCornersWgs(grid));
+    run.water = new WaterCanvas(grid, toWgs, toL93);
+    setWaterCanvas(state.map, run.water.canvas, run.water.corners);
     setLayerVisible('water', document.querySelector('[data-layer=water]').checked);
     state.water3dGrid = null;
     state.lastQ = null;

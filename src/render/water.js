@@ -82,18 +82,101 @@ export function buildLut({ runoff = false, palette = 'bleus', scale = 'standard'
   return lut;
 }
 
+const R_EARTH = 6378137;
+const toMerc = ([lon, lat]) => [
+  (R_EARTH * lon * Math.PI) / 180,
+  R_EARTH * Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360)),
+];
+const fromMerc = (x, y) => [(x / R_EARTH) * (180 / Math.PI), (2 * Math.atan(Math.exp(y / R_EARTH)) - Math.PI / 2) * (180 / Math.PI)];
+
+/**
+ * Image de la hauteur d'eau, reprojetée en Web Mercator (projection de la carte).
+ * La grille de calcul est en Lambert 93 : posée telle quelle par ses 4 coins, MapLibre la
+ * déformerait de façon affine et l'eau serait décalée jusqu'à ~50 m au milieu d'une grande
+ * grille. Ici chaque pixel de l'image (rectangle aligné sur la carte) pointe vers sa maille,
+ * via une table calculée une fois (projection exacte sur un treillis, interpolée entre).
+ * @param grid  grille Lambert 93 { xmin, ymax, dx, nx, ny }
+ * @param toWgs fonction [x, y] L93 -> [lon, lat]
+ * @param toL93 fonction (lon, lat) -> [x, y] L93
+ */
 export class WaterCanvas {
-  constructor(nx, ny) {
+  constructor(grid, toWgs, toL93) {
+    const { nx, ny, dx, xmin, ymax } = grid;
+    // Emprise Mercator de la grille (bords échantillonnés : ils sont légèrement courbes)
+    let mx0 = Infinity;
+    let mx1 = -Infinity;
+    let my0 = Infinity;
+    let my1 = -Infinity;
+    const E = 24;
+    for (let k = 0; k <= E; k++) {
+      for (const [gx, gy] of [[k / E, 0], [k / E, 1], [0, k / E], [1, k / E]]) {
+        const [mx, my] = toMerc(toWgs(xmin + gx * nx * dx, ymax - gy * ny * dx));
+        mx0 = Math.min(mx0, mx);
+        mx1 = Math.max(mx1, mx);
+        my0 = Math.min(my0, my);
+        my1 = Math.max(my1, my);
+      }
+    }
+    // Taille de pixel : une demi-maille sur les petites grilles (bords nets malgré la rotation),
+    // une maille au-delà ; au plus 8192 pixels de côté.
+    const lat = fromMerc(0, (my0 + my1) / 2)[1];
+    const f = nx * ny <= 1.5e6 ? 2 : 1;
+    let pm = dx / f / Math.cos((lat * Math.PI) / 180);
+    pm = Math.max(pm, (mx1 - mx0) / 8192, (my1 - my0) / 8192);
+    const W = Math.max(1, Math.ceil((mx1 - mx0) / pm));
+    const H = Math.max(1, Math.ceil((my1 - my0) / pm));
+    mx1 = mx0 + W * pm;
+    my0 = my1 - H * pm;
+    // Treillis de correspondance pixel -> maille (exact aux nœuds, interpolé entre eux)
+    const S = 16;
+    const LW = Math.ceil(W / S) + 1;
+    const LH = Math.ceil(H / S) + 1;
+    const lgx = new Float64Array(LW * LH);
+    const lgy = new Float64Array(LW * LH);
+    for (let lj = 0; lj < LH; lj++)
+      for (let li = 0; li < LW; li++) {
+        const [lon, la] = fromMerc(mx0 + li * S * pm, my1 - lj * S * pm);
+        const [x, y] = toL93(lon, la);
+        lgx[lj * LW + li] = (x - xmin) / dx;
+        lgy[lj * LW + li] = (ymax - y) / dx;
+      }
+    const map = new Int32Array(W * H);
+    for (let j = 0; j < H; j++) {
+      const fy = (j + 0.5) / S;
+      const lj = Math.min(LH - 2, Math.floor(fy));
+      const ty = fy - lj;
+      for (let i = 0; i < W; i++) {
+        const fx = (i + 0.5) / S;
+        const li = Math.min(LW - 2, Math.floor(fx));
+        const tx = fx - li;
+        const a = lj * LW + li;
+        const gx =
+          (1 - ty) * ((1 - tx) * lgx[a] + tx * lgx[a + 1]) + ty * ((1 - tx) * lgx[a + LW] + tx * lgx[a + LW + 1]);
+        const gy =
+          (1 - ty) * ((1 - tx) * lgy[a] + tx * lgy[a + 1]) + ty * ((1 - tx) * lgy[a + LW] + tx * lgy[a + LW + 1]);
+        const ci = Math.floor(gx);
+        const cj = Math.floor(gy);
+        map[j * W + i] = ci >= 0 && cj >= 0 && ci < nx && cj < ny ? cj * nx + ci : -1;
+      }
+    }
+    this.map = map;
     this.canvas = document.createElement('canvas');
-    this.canvas.width = nx;
-    this.canvas.height = ny;
+    this.canvas.width = W;
+    this.canvas.height = H;
     this.ctx = this.canvas.getContext('2d');
-    this.image = this.ctx.createImageData(nx, ny);
+    this.image = this.ctx.createImageData(W, H);
     this.px = new Uint32Array(this.image.data.buffer);
+    // Coins pour MapLibre : NO, NE, SE, SO (rectangle aligné sur la carte)
+    const nw = fromMerc(mx0, my1);
+    const se = fromMerc(mx1, my0);
+    this.corners = [nw, [se[0], nw[1]], se, [nw[0], se[1]]];
   }
   draw(q, lut) {
-    const px = this.px;
-    for (let k = 0; k < q.length; k++) px[k] = lut[q[k]];
+    const { px, map } = this;
+    for (let o = 0; o < map.length; o++) {
+      const k = map[o];
+      px[o] = k >= 0 ? lut[q[k]] : 0;
+    }
     this.ctx.putImageData(this.image, 0, 0);
   }
   clear() {
