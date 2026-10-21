@@ -70,6 +70,7 @@ function params() {
     soil: soilGroup(),
     soilMode: $('soil').value,
     zone: 'study',
+    stopAfterPeak: $('stop-peak').checked,
     res: Number($('res').value),
     tailH: Math.max(0, Number($('tail-h').value) || 0),
     burn: Math.max(0, Number($('burn').value) || 0),
@@ -700,6 +701,11 @@ async function startRun() {
       onGauge: (t, Q) => {
         Q.forEach((q, i) => run.series[i].push([t, q]));
         drawHydroThrottled();
+        if (p.stopAfterPeak && !run.stop && peakPassed(run, t, p)) {
+          run.autoStopped = true;
+          stopRun();
+          prog.status('Pic de crue passé : arrêt du calcul…');
+        }
       },
       onSnapshot: async (t, h) => {
         const q = await run.store.add(t, h);
@@ -752,6 +758,24 @@ async function startRun() {
     $('run').textContent = 'Lancer la simulation';
     $('run').classList.remove('stop');
   }
+}
+
+/**
+ * Le pic de crue est-il passé ? Après la fin de la pluie (+ 30 min), à tous les points de suivi
+ * ayant un débit notable, le débit est retombé sous 70 % de son maximum, deux mesures de suite.
+ */
+function peakPassed(run, t, p) {
+  if (t < p.rainH * 3600 + 1800) return false;
+  let any = false;
+  for (const s of run.series) {
+    let peak = 0;
+    for (const [, q] of s) if (q > peak) peak = q;
+    if (peak < 0.05) continue;
+    any = true;
+    const n = s.length;
+    if (n < 3 || s[n - 1][1] > 0.7 * peak || s[n - 2][1] > 0.7 * peak) return false;
+  }
+  return any;
 }
 
 function runCpu(run, model, p, totalTime, snapshotEvery, cb) {
@@ -825,10 +849,16 @@ function finishRun(run, mass) {
   }
   if (state.data.warnings?.length) txt += `<br><span class="warn">Données : ${state.data.warnings.join(' ; ')}.</span>`;
   $('summary').innerHTML = txt;
-  const stopped = run.stop && (run.tEnd ?? run.totalTime) < run.totalTime - 1;
+  const auto = run.autoStopped && run.tEnd != null;
+  const stopped = !auto && run.stop && (run.tEnd ?? run.totalTime) < run.totalTime - 1;
+  if (auto) run.totalTime = run.tEnd; // la suite de la décrue n'a pas été calculée
   if (!stopped) prog.set('sim', 1, `${fmtH(run.totalTime)} en ${fmtClock(el)}`);
   prog.finish(
-    stopped ? `Arrêtée à ${fmtH(run.tEnd ?? 0)} : résultats partiels.` : `Terminé : ${fmtH(run.totalTime)} simulées.`,
+    stopped
+      ? `Arrêtée à ${fmtH(run.tEnd ?? 0)} : résultats partiels.`
+      : auto
+        ? `Terminé : pic de crue passé, arrêt à ${fmtH(run.totalTime)}.`
+        : `Terminé : ${fmtH(run.totalTime)} simulées.`,
     !stopped,
   );
   drawHydro();
