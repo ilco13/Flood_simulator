@@ -19,7 +19,7 @@ function geomToWgs(g) {
 const post = (type, data, transfer) => self.postMessage({ type, ...data }, transfer || []);
 
 self.onmessage = async (e) => {
-  const { grid, burnDepth, outlet, upstreamOf, gauges: gaugeDefs } = e.data;
+  const { grid, burnDepth, outlet, upstreamOf, obstacles, gauges: gaugeDefs } = e.data;
   try {
     const last = {};
     const step = (key, p, detail) => {
@@ -73,7 +73,7 @@ self.onmessage = async (e) => {
     const classes = regroupSamples(sub, grid, f);
 
     step('prep', 0.4);
-    const terrain = prepareTerrain({ grid, dem, rivers, burnDepth, outlet, upstreamOf });
+    const terrain = prepareTerrain({ grid, dem, rivers, burnDepth, outlet, upstreamOf, obstacles });
     // Points de suivi : seulement ceux qui coupent le bassin simulé.
     const gauges = buildGauges(grid, rivers, gaugeDefs).filter(
       (g) => !terrain.mask || Array.from(g.cells).some((k) => terrain.mask[k] || terrain.mask[k + 1] || terrain.mask[k + grid.nx]),

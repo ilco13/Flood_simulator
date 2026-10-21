@@ -9,12 +9,15 @@ import { cellOf } from '../geo.js';
  * Prétraitements indépendants de la pluie : gravure du réseau, bassin versant.
  * @returns {{ z: Float32Array, mask: Uint8Array, basinCells: number, burned: number, breached: number }}
  */
-export function prepareTerrain({ grid, dem, rivers, burnDepth, outlet, upstreamOf }) {
+export function prepareTerrain({ grid, dem, rivers, burnDepth, outlet, upstreamOf, obstacles }) {
   const z = dem.slice();
   const burned = rivers && burnDepth > 0 ? burnRivers(grid, z, rivers, burnDepth) : 0;
+  // Ouvrages dessinés par l'utilisateur (absents du MNT, qui est un modèle du sol nu).
+  const protect = obstacles?.length ? applyObstacles(grid, z, obstacles) : null;
   const { label, breached, parent, order, filled } = drainageLabels(z, grid.nx, grid.ny, {
     maxDepth: Math.max(2, 0.3 * grid.dx),
     maxLength: Math.max(4, Math.round(300 / grid.dx)),
+    protect,
   });
   let mask = null;
   let basinCells = grid.nx * grid.ny;
@@ -55,6 +58,70 @@ export function prepareTerrain({ grid, dem, rivers, burnDepth, outlet, upstreamO
     }
   }
   return { z, mask, basinCells, burned, breached };
+}
+
+/**
+ * Ajoute au relief les ouvrages dessinés (coordonnées Lambert 93) :
+ *  - bâtiment (polygone) : mailles dont le centre est dedans relevées de `h` (au moins la maille
+ *    du centre de gravité pour un petit bâtiment) ; l'eau le contourne ;
+ *  - mur (ligne) : mailles traversées (chemin 4-connexe, étanche pour l'écoulement) relevées de `h`.
+ * Renvoie le masque des mailles modifiées (protégées du débrèchage).
+ */
+export function applyObstacles(grid, z, obstacles) {
+  const { nx, ny, dx, xmin, ymax } = grid;
+  const protect = new Uint8Array(nx * ny);
+  const raise = new Float32Array(nx * ny);
+  for (const o of obstacles) {
+    const h = Math.max(0, Number(o.h) || 0);
+    if (!h || !o.pts?.length) continue;
+    if (o.type === 'wall') {
+      rasterizeLine(grid, o.pts, (k) => {
+        raise[k] = Math.max(raise[k], h);
+      });
+      continue;
+    }
+    // Polygone : remplissage par lignes (centres de mailles)
+    const P = o.pts;
+    let ymin = Infinity;
+    let ymx = -Infinity;
+    for (const [, y] of P) {
+      ymin = Math.min(ymin, y);
+      ymx = Math.max(ymx, y);
+    }
+    let any = false;
+    const j0 = Math.max(0, Math.floor((ymax - ymx) / dx));
+    const j1 = Math.min(ny - 1, Math.ceil((ymax - ymin) / dx));
+    for (let j = j0; j <= j1; j++) {
+      const yc = ymax - (j + 0.5) * dx;
+      const xs = [];
+      for (let a = 0, b = P.length - 1; a < P.length; b = a++) {
+        const [xa, ya] = P[a];
+        const [xb, yb] = P[b];
+        if ((ya > yc) !== (yb > yc)) xs.push(xa + ((yc - ya) * (xb - xa)) / (yb - ya));
+      }
+      xs.sort((u, v) => u - v);
+      for (let m = 0; m + 1 < xs.length; m += 2) {
+        const i0 = Math.max(0, Math.ceil((xs[m] - xmin) / dx - 0.5));
+        const i1 = Math.min(nx - 1, Math.floor((xs[m + 1] - xmin) / dx - 0.5));
+        for (let i = i0; i <= i1; i++) {
+          raise[j * nx + i] = Math.max(raise[j * nx + i], h);
+          any = true;
+        }
+      }
+    }
+    if (!any) {
+      const cx = P.reduce((a, p) => a + p[0], 0) / P.length;
+      const cy = P.reduce((a, p) => a + p[1], 0) / P.length;
+      const c = cellOf(grid, cx, cy);
+      if (c) raise[c.k] = Math.max(raise[c.k], h);
+    }
+  }
+  for (let k = 0; k < raise.length; k++)
+    if (raise[k] > 0) {
+      z[k] += raise[k];
+      protect[k] = 1;
+    }
+  return protect;
 }
 
 /** Relief conditionné et réseau d'écoulement D8 (pour délimiter des bassins versants). */

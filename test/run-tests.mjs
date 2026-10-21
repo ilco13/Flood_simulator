@@ -4,7 +4,7 @@ import { makeHyetograph } from '../src/hydrology/rain.js';
 import { runoffMm, runoffRate, retentionMm, adjustCn } from '../src/hydrology/scs.js';
 import { CpuBackend, simulate } from '../src/sim/driver.js';
 import { CpuSolver } from '../src/sim/cpuSolver.js';
-import { buildGauges } from '../src/sim/model.js';
+import { buildGauges, prepareTerrain } from '../src/sim/model.js';
 import { drainageLabels, basinMask, accumulation, upstreamMask, flowDirections } from '../src/hydrology/terrain.js';
 
 let failures = 0;
@@ -201,6 +201,27 @@ await test('point de suivi oblique : chaque écoulement compté une seule fois',
     const [Q] = CpuSolver.prototype.gaugeDischarges.call({ nx, qx, qy }, [g]);
     assert.ok(Math.abs(Q - 100) < 1e-6, `angle ${deg}° : ${Q} m³/s au lieu de 100`);
   }
+});
+
+await test('mur dessiné : relevé dans le relief et jamais percé par le débrèchage', () => {
+  // Pente douce vers l'est ; un mur nord-sud de 1,5 m crée une cuvette à l'amont.
+  const nx = 40;
+  const ny = 20;
+  const dx = 5;
+  const grid = { xmin: 0, ymin: 0, xmax: nx * dx, ymax: ny * dx, nx, ny, dx };
+  const dem = new Float32Array(nx * ny);
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) dem[j * nx + i] = 100 - i * 0.05;
+  const wall = { type: 'wall', h: 1.5, pts: [[102.5, -10], [102.5, 110]] };
+  const t = prepareTerrain({ grid, dem, rivers: null, burnDepth: 0, obstacles: [wall] });
+  for (let j = 0; j < ny; j++) {
+    const k = j * nx + 20;
+    assert.ok(Math.abs(t.z[k] - (dem[k] + 1.5)) < 1e-4, `mur abaissé en ligne ${j}`);
+  }
+  const b = { type: 'building', h: 6, pts: [[150, 30], [170, 30], [170, 60], [150, 60]] };
+  const t2 = prepareTerrain({ grid, dem, rivers: null, burnDepth: 0, obstacles: [b] });
+  let raised = 0;
+  for (let k = 0; k < t2.z.length; k++) if (t2.z[k] - dem[k] > 5.9) raised++;
+  assert.equal(raised, 4 * 6); // 20 m × 30 m = 4 × 6 mailles de 5 m
 });
 
 console.log(failures ? `\n${failures} échec(s)` : '\nTous les tests passent.');

@@ -40,6 +40,18 @@
               <ul id="catch-list" class="catch-list"></ul>
               <p id="catch-info" class="hint"></p>
             </div>
+            <div id="obs-box">
+              <span class="lbl">Ouvrages absents du relief</span>
+              <p class="hint">
+                Le relief LiDAR est un modèle du sol nu : bâtiments et murs n'y figurent pas. Dessinez ceux qui
+                comptent pour l'écoulement : l'eau devra les contourner ou passer par-dessus.
+              </p>
+              <div class="btn-row">
+                <button id="obs-building" class="ghost" type="button">+ Bâtiment</button>
+                <button id="obs-wall" class="ghost" type="button">+ Mur</button>
+              </div>
+              <ul id="obs-list" class="obs-list"></ul>
+            </div>
           </section>
 
           <section>
@@ -178,6 +190,12 @@
       <main id="map">
         <div id="map-status" hidden></div>
         <div id="map-tip" hidden></div>
+        <div id="draw-bar" hidden>
+          <span id="draw-hint"></span>
+          <button id="draw-undo" class="chip-btn" type="button">Annuler le point</button>
+          <button id="draw-finish" class="chip-btn on" type="button">Terminer</button>
+          <button id="draw-cancel" class="icon-ghost" type="button" title="Abandonner">✕</button>
+        </div>
         <div id="map-legend" hidden aria-label="Légende des hauteurs d'eau"></div>
         <div id="results-dock" hidden>
           <div class="dock-head">

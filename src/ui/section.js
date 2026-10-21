@@ -192,7 +192,7 @@ export function drawSection(canvas, s) {
   const { pts, L } = s;
   const n = pts.length;
   const ground = new Float32Array(n);
-  for (let i = 0; i < n; i++) ground[i] = s.fine && Number.isFinite(s.fine[i]) ? s.fine[i] : pts[i].zi;
+  for (let i = 0; i < n; i++) ground[i] = (s.fine && Number.isFinite(s.fine[i]) ? s.fine[i] : pts[i].zi) + (s.raise?.[i] || 0);
   // Niveaux d'eau (surface libre) à l'instant et maximum, tirés de la simulation
   const level = poolLevels(pts, ground, (p) => p.h, 0.05);
   // Le niveau max n'est tracé que là où l'eau a dépassé 10 cm (pas la lame de ruissellement).

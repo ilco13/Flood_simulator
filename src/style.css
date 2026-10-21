@@ -1130,3 +1130,70 @@ details.advanced h3 {
 .ref-events button.link:hover {
   color: var(--accent);
 }
+
+/* Ouvrages dessinés */
+#obs-box {
+  margin-top: 12px;
+}
+.obs-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.obs-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.obs-name {
+  flex: 1;
+  font-weight: 600;
+}
+.obs-h {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.obs-h input {
+  width: 58px;
+  padding: 3px 5px;
+}
+#draw-bar {
+  position: absolute;
+  bottom: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 7;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  max-width: calc(100% - 24px);
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 8px 10px;
+  font-size: 13px;
+}
+@media (max-width: 760px) {
+  #draw-bar {
+    bottom: 96px;
+  }
+}
+
+/* Un élément masqué reste masqué, quel que soit son mode d’affichage */
+[hidden] {
+  display: none !important;
+}

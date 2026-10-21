@@ -115,13 +115,14 @@ export function drainageLabels(z, nx, ny, breach = null) {
 }
 
 /** Creuse un passage descendant depuis la cuvette (cote zn) en remontant la chaîne `parent`. */
-function tryBreach(z, parent, start, zn, { maxDepth, maxLength }, eps) {
+function tryBreach(z, parent, start, zn, { maxDepth, maxLength, protect }, eps) {
   let p = start;
   let i = 1;
   for (;;) {
     const target = zn - eps * i;
     if (z[p] <= target) break; // le passage rejoint un terrain plus bas : ok
     if (z[p] - target > maxDepth || i > maxLength) return false;
+    if (protect && protect[p]) return false; // ouvrage ajouté (mur, bâtiment) : on ne le perce pas
     if (parent[p] === -1) break; // bord du domaine : l'eau sort
     p = parent[p];
     i++;
