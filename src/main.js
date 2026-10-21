@@ -8,7 +8,7 @@ import { meanRunoff, runoffMm } from './hydrology/scs.js';
 import { simulate } from './sim/driver.js';
 import { getGpuDevice, gpuMaxCells, GpuSolver } from './sim/gpuSolver.js';
 import { SnapshotStore, quantize, dequantize } from './sim/snapshots.js';
-import { WaterCanvas, buildLut, LEGEND } from './render/water.js';
+import { WaterCanvas, buildLut, legendStops, PALETTES, SCALES, RUNOFF } from './render/water.js';
 import { drawChart } from './ui/chart.js';
 import { cacheClear } from './data/cache.js';
 import { stableDt } from './sim/scheme.js';
@@ -25,7 +25,9 @@ const GPU_CELL_CAP = 30e6;
 const CPU_CELL_CAP = 8e6;
 const ZOOM_RESOLUTIONS = [10, 5, 2, 1];
 const STUDY_RESOLUTIONS = [50, 25, 15, 10, 5, 2, 1];
-const FLOOD_THRESHOLD = 0.1; // m : en dessous, lame de ruissellement
+const COLORS_KEY = 'flood-sim-colors';
+/** Hauteur (m) à partir de laquelle l'eau est dessinée comme inondation (1er palier). */
+const floodThreshold = () => SCALES[state.scale].breaks[0];
 const GAUGE_COLORS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#9a6324', '#000075'];
 
 const state = {
@@ -37,8 +39,10 @@ const state = {
   amc: 2,
   viewMode: 't',
   threshold: 0.1,
-  lut: buildLut(0.1, true),
+  lut: null,
   runoff: true,
+  palette: 'bleus',
+  scale: 'standard',
   hiddenGauges: new Set(),
   probe: null,
 };
@@ -258,9 +262,9 @@ function setupUi() {
   };
   $('runoff').addEventListener('change', () => {
     state.runoff = $('runoff').checked;
-    state.lut = buildLut(FLOOD_THRESHOLD, state.runoff);
-    renderCurrent();
+    applyColors();
   });
+  setupColors();
   $('soil').addEventListener('input', renderSoilInfo);
 
   for (const id of ['rain-mm', 'rain-h', 'rain-shape', 'soil', 'cnf']) $(id).addEventListener('input', updateRainInfo);
@@ -301,9 +305,6 @@ function setupUi() {
   });
   refreshSaved();
 
-  $('legend').innerHTML = LEGEND.map(
-    (l) => `<span${l.runoff ? ' class="runoff-sw"' : ''}><i style="background:rgb(${l.color.join(',')})"></i>${l.label}</span>`,
-  ).join('');
 
   document.querySelectorAll('[data-layer]').forEach((cb) =>
     cb.addEventListener('change', () => setLayerVisible(cb.dataset.layer, cb.checked)),
@@ -320,6 +321,75 @@ function setupUi() {
   });
 }
 
+/* ---------- Couleurs de l'eau et légende ---------- */
+
+function setupColors() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(COLORS_KEY) || 'null');
+    if (PALETTES[saved?.palette]) state.palette = saved.palette;
+    if (SCALES[saved?.scale]) state.scale = saved.scale;
+  } catch {
+    /* stockage indisponible */
+  }
+  const fill = (id, table, value) => {
+    const sel = $(id);
+    for (const [k, v] of Object.entries(table)) {
+      const o = document.createElement('option');
+      o.value = k;
+      o.textContent = v.label;
+      sel.appendChild(o);
+    }
+    sel.value = value;
+  };
+  fill('palette', PALETTES, state.palette);
+  fill('scale', SCALES, state.scale);
+  for (const id of ['palette', 'scale'])
+    $(id).addEventListener('input', () => {
+      state[id] = $(id).value;
+      try {
+        localStorage.setItem(COLORS_KEY, JSON.stringify({ palette: state.palette, scale: state.scale }));
+      } catch {
+        /* rien */
+      }
+      applyColors();
+    });
+  applyColors(false);
+}
+
+/** Recalcule la table de couleurs, la légende de la carte et le rendu. */
+function applyColors(render = true) {
+  state.lut = buildLut({ runoff: state.runoff, palette: state.palette, scale: state.scale });
+  state.water3d?.setThreshold(floodThreshold());
+  state.water3d?.setColors(legendStops(state.palette, state.scale));
+  renderMapLegend();
+  if (render) renderCurrent();
+}
+
+const fmtBreak = (d) => (d < 1 ? `${Math.round(d * 100)} cm` : `${String(d).replace('.', ',')} m`);
+
+/** Légende verticale sur le bord droit de la carte : dégradé et hauteurs associées. */
+function renderMapLegend() {
+  const el = $('map-legend');
+  const stops = legendStops(state.palette, state.scale);
+  const n = stops.length;
+  const rgb = (c) => `rgb(${c.join(',')})`;
+  // Du plus profond (en haut) au plus faible (en bas), intervalles de même hauteur.
+  let bar = '';
+  for (let i = n - 1; i > 0; i--)
+    bar += `<span class="ml-seg" style="background:linear-gradient(to bottom, ${rgb(stops[i].rgb)}, ${rgb(stops[i - 1].rgb)})"></span>`;
+  const labels = stops
+    .slice()
+    .reverse()
+    .map((s, i) => `<span style="top:${(i / (n - 1)) * 100}%">${i === 0 ? '≥ ' : ''}${fmtBreak(s.d)}</span>`)
+    .join('');
+  el.innerHTML =
+    `<div class="ml-title">Hauteur d'eau</div>` +
+    `<div class="ml-scale"><div class="ml-bar">${bar}</div><div class="ml-labels">${labels}</div></div>` +
+    (state.runoff
+      ? `<div class="ml-runoff"><i style="background:${rgb(RUNOFF.color)}"></i>Ruissellement<br>1 cm – ${fmtBreak(stops[0].d)}</div>`
+      : '');
+}
+
 /** « Heure par heure » (t) ou « maximum atteint » (max). */
 function setViewMode(v) {
   state.viewMode = v;
@@ -329,6 +399,7 @@ function setViewMode(v) {
 /** Fenêtre des résultats : affichée dès qu'une simulation commence ou est rouverte. */
 function showResults(on) {
   $('results-dock').hidden = !on;
+  $('map-legend').hidden = !on;
   if (on) drawHydro();
 }
 
@@ -936,7 +1007,7 @@ function setupMapTip() {
     if (!c) return (tip.hidden = true);
     const h = dequantize(state.lastQ[c.k]);
     const hm = run.maxima ? run.maxima.hmax[c.k] : 0;
-    const thr = state.runoff ? 0.01 : FLOOD_THRESHOLD;
+    const thr = state.runoff ? 0.01 : floodThreshold();
     if (h < thr && hm < thr) return (tip.hidden = true);
     const when = state.viewMode === 'max' ? 'maximum atteint' : `à ${$('time-label').textContent}`;
     let html = h >= 0.01 ? `<b>${fmtD(h)}</b> d'eau ${when}` : `Pas d'eau ${when}`;
@@ -1084,8 +1155,18 @@ async function soilTexture(lon, lat) {
   const q = new URLSearchParams({ lon: lon.toFixed(5), lat: lat.toFixed(5), value: 'mean' });
   for (const pr of ['clay', 'sand']) q.append('property', pr);
   for (const d of ['0-5cm', '30-60cm']) q.append('depth', d);
-  const res = await fetchWithTimeout(`https://rest.isric.org/soilgrids/v2.0/properties/query?${q}`, 25000);
-  if (!res.ok) throw new Error(`SoilGrids HTTP ${res.status}`);
+  // Service parfois lent ou limité en débit : jusqu'à 3 essais espacés.
+  let res;
+  for (let a = 0; a < 3; a++) {
+    try {
+      res = await fetchWithTimeout(`https://rest.isric.org/soilgrids/v2.0/properties/query?${q}`, 25000);
+      if (res.ok) break;
+    } catch (e) {
+      if (a === 2) throw e;
+    }
+    await new Promise((r) => setTimeout(r, 4000 * (a + 1)));
+  }
+  if (!res?.ok) throw new Error(`SoilGrids HTTP ${res?.status}`);
   const layers = (await res.json()).properties?.layers || [];
   const get = (name) =>
     (layers.find((l) => l.name === name)?.depths || []).map((d) => d.values?.mean).filter((v) => v != null).map((v) => v / 10);
@@ -1970,7 +2051,8 @@ async function main() {
   // Accès à l'état depuis la console du navigateur (diagnostic).
   window.floodApp = state;
   state.water3d = new Water3DLayer();
-  state.water3d.setThreshold(FLOOD_THRESHOLD);
+  state.water3d.setThreshold(floodThreshold());
+  state.water3d.setColors(legendStops(state.palette, state.scale));
   state.map.addLayer(state.water3d, 'rivers');
   state.ctrl3d = new Toggle3dControl((on) => toggle3d(on));
   state.map.addControl(state.ctrl3d, 'top-right');

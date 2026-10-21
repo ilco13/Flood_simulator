@@ -987,3 +987,89 @@ details.advanced h3 {
 #results-dock.min {
   min-height: 0;
 }
+
+/* Légende verticale des hauteurs d'eau, bord droit de la carte */
+#map-legend {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-40%);
+  z-index: 3;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  padding: 8px 10px 8px 8px;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+.ml-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+  font-size: 11.5px;
+}
+.ml-scale {
+  display: flex;
+  gap: 6px;
+  height: 190px;
+}
+.ml-bar {
+  width: 14px;
+  display: flex;
+  flex-direction: column;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+}
+.ml-bar .ml-seg {
+  flex: 1;
+}
+.ml-labels {
+  position: relative;
+  width: 52px;
+}
+.ml-labels span {
+  position: absolute;
+  left: 0;
+  transform: translateY(-50%);
+  white-space: nowrap;
+}
+.ml-labels span::before {
+  content: '';
+  position: absolute;
+  left: -8px;
+  top: 50%;
+  width: 5px;
+  border-top: 1px solid var(--muted);
+}
+.ml-runoff {
+  margin-top: 10px;
+  line-height: 1.3;
+  color: var(--muted);
+}
+.ml-runoff i {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  margin-right: 5px;
+  vertical-align: -2px;
+}
+@media (max-width: 760px) {
+  #map-legend {
+    top: auto;
+    bottom: 96px;
+    transform: none;
+    right: 6px;
+    padding: 6px 8px 6px 6px;
+    font-size: 10.5px;
+  }
+  .ml-scale {
+    height: 130px;
+  }
+  .ml-labels {
+    width: 44px;
+  }
+}

@@ -31,12 +31,22 @@ precision mediump float;
 varying float v_d;
 uniform float u_thr;
 uniform float u_alpha;
+// Palette de la carte : paliers de hauteur (m) et couleurs associées (8 au plus).
+uniform float u_breaks[8];
+uniform vec3 u_cols[8];
+uniform int u_n;
 void main() {
   if (v_d < u_thr) discard;
-  float t = clamp(log(v_d / max(u_thr, 0.01)) / log(4.0 / max(u_thr, 0.01)), 0.0, 1.0);
-  vec3 light = vec3(0.45, 0.75, 1.0);
-  vec3 deep = vec3(0.02, 0.16, 0.45);
-  vec3 c = mix(light, deep, t);
+  vec3 c = u_cols[0];
+  float t = 0.0;
+  for (int i = 0; i < 7; i++) {
+    if (i >= u_n - 1) break;
+    if (v_d >= u_breaks[i]) {
+      float f = clamp((v_d - u_breaks[i]) / (u_breaks[i + 1] - u_breaks[i]), 0.0, 1.0);
+      c = mix(u_cols[i], u_cols[i + 1], f);
+      t = (float(i) + f) / float(u_n - 1);
+    }
+  }
   float a = u_alpha * mix(0.55, 0.9, t);
   gl_FragColor = vec4(c * a, a);
 }`;
@@ -127,6 +137,12 @@ export class Water3DLayer {
     this.map?.triggerRepaint();
   }
 
+  /** Palette : [{ d, rgb }] du plus faible au plus profond (comme la légende de la carte). */
+  setColors(stops) {
+    this.stops = stops.slice(0, 8);
+    this.map?.triggerRepaint();
+  }
+
   setThreshold(t) {
     this.threshold = t;
     this.map?.triggerRepaint();
@@ -155,6 +171,9 @@ export class Water3DLayer {
       cap: gl.getUniformLocation(p, 'u_cap'),
       thr: gl.getUniformLocation(p, 'u_thr'),
       alpha: gl.getUniformLocation(p, 'u_alpha'),
+      breaks: gl.getUniformLocation(p, 'u_breaks'),
+      cols: gl.getUniformLocation(p, 'u_cols'),
+      n: gl.getUniformLocation(p, 'u_n'),
     };
     this.buf = { pos: gl.createBuffer(), z: gl.createBuffer(), q: gl.createBuffer(), idx: gl.createBuffer() };
     this.uint32 = typeof WebGL2RenderingContext !== 'undefined' && gl instanceof WebGL2RenderingContext
@@ -209,6 +228,19 @@ export class Water3DLayer {
     gl.uniform1f(this.loc.cap, DEPTH_CAP);
     gl.uniform1f(this.loc.thr, this.threshold);
     gl.uniform1f(this.loc.alpha, this.alpha);
+    const stops = this.stops || [
+      { d: 0.1, rgb: [115, 190, 255] },
+      { d: 4, rgb: [5, 40, 115] },
+    ];
+    const br = new Float32Array(8);
+    const co = new Float32Array(24);
+    stops.forEach((st, i) => {
+      br[i] = st.d;
+      co.set(st.rgb.map((v) => v / 255), 3 * i);
+    });
+    gl.uniform1fv(this.loc.breaks, br);
+    gl.uniform3fv(this.loc.cols, co);
+    gl.uniform1i(this.loc.n, stops.length);
     const attr = (loc, buf, size, type) => {
       gl.bindBuffer(gl.ARRAY_BUFFER, buf);
       gl.enableVertexAttribArray(loc);

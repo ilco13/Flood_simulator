@@ -132,6 +132,13 @@
                 </select>
               </label>
               <p id="engine-info" class="hint"></p>
+              <h3>Couleurs de l'eau</h3>
+              <label>Palette
+                <select id="palette"></select>
+              </label>
+              <label>Paliers de hauteur d'eau
+                <select id="scale"></select>
+              </label>
               <h3>Couches de la carte</h3>
               <label class="check"><input type="checkbox" data-layer="water" checked /> Eau simulée</label>
               <label class="check"><input type="checkbox" data-layer="rivers" checked /> Cours d'eau (BD TOPO)</label>
@@ -166,6 +173,7 @@
       <main id="map">
         <div id="map-status" hidden></div>
         <div id="map-tip" hidden></div>
+        <div id="map-legend" hidden aria-label="Légende des hauteurs d'eau"></div>
         <div id="results-dock" hidden>
           <div class="dock-head">
             <button id="play" class="icon sm" type="button" aria-label="Lecture">▶</button>
@@ -175,10 +183,7 @@
             <button id="res-min" class="icon-ghost" type="button" title="Réduire / agrandir">▾</button>
           </div>
           <div class="rdock-body">
-            <div class="legend-row">
-              <div id="legend" class="legend"></div>
-              <label class="check small"><input type="checkbox" id="runoff" checked /> Ruissellement</label>
-            </div>
+            <label class="check small"><input type="checkbox" id="runoff" checked /> Afficher le ruissellement (lame d'eau mince, en turquoise)</label>
             <h3>Débits (m³/s)</h3>
             <canvas id="hydro" class="chart" aria-label="Hydrogrammes"></canvas>
             <div id="gauge-legend" class="legend gauges"></div>
