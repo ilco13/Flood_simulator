@@ -12,8 +12,12 @@ const STOPS = [
   [4.0, [5, 20, 70], 0.9],
 ];
 
+// Ruissellement : lame d'eau mince (1 cm jusqu'au seuil d'inondation), en turquoise clair.
+const RUNOFF = { color: [60, 225, 190], a0: 0.28, a1: 0.5 };
+
 export const LEGEND = [
-  { label: '< 20 cm', color: STOPS[0][1] },
+  { label: 'ruissellement < 10 cm', color: RUNOFF.color, runoff: true },
+  { label: '10–20 cm', color: STOPS[0][1] },
   { label: '20–50 cm', color: STOPS[1][1] },
   { label: '0,5–1 m', color: STOPS[2][1] },
   { label: '1–2 m', color: STOPS[3][1] },
@@ -27,12 +31,23 @@ export function colorForDepth(d) {
   return s;
 }
 
-/** Table de correspondance valeur quantifiée -> pixel RGBA (Uint32, petit-boutiste). */
-export function buildLut(threshold) {
+/**
+ * Table de correspondance valeur quantifiée -> pixel RGBA (Uint32, petit-boutiste).
+ * Sous le seuil d'inondation, la lame de ruissellement est dessinée en turquoise si `runoff`.
+ */
+export function buildLut(threshold, runoff = false) {
   const lut = new Uint32Array(256);
   for (let v = 1; v < 256; v++) {
     const d = dequantize(v);
-    if (d < threshold) continue;
+    if (d < threshold) {
+      if (runoff && d >= 0.01) {
+        const t = Math.min(1, d / threshold);
+        const al = Math.round((RUNOFF.a0 + (RUNOFF.a1 - RUNOFF.a0) * t) * 255);
+        const [r, g, b] = RUNOFF.color;
+        lut[v] = (al << 24) | (b << 16) | (g << 8) | r;
+      }
+      continue;
+    }
     // Interpolation entre le dernier palier atteint et le suivant
     let i = 0;
     while (i < STOPS.length - 1 && d >= STOPS[i + 1][0]) i++;

@@ -19,10 +19,13 @@ import { fitBoundsOf } from './map.js';
 import { sectionEnds, autoOrientation, fetchFineProfile, sampleSection, drawSection } from './ui/section.js';
 
 const $ = (id) => document.getElementById(id);
-const GPU_CELL_CAP = 16e6;
-const CPU_CELL_CAP = 2.5e6;
+// Limites mémoire (au-delà, le navigateur risque de manquer de mémoire) ; le temps de calcul,
+// lui, n'est jamais bloquant : on prévient seulement.
+const GPU_CELL_CAP = 30e6;
+const CPU_CELL_CAP = 8e6;
 const ZOOM_RESOLUTIONS = [10, 5, 2, 1];
-const STUDY_RESOLUTIONS = [50, 25, 15, 10, 5, 2];
+const STUDY_RESOLUTIONS = [50, 25, 15, 10, 5, 2, 1];
+const FLOOD_THRESHOLD = 0.1; // m : en dessous, lame de ruissellement
 const GAUGE_COLORS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#9a6324', '#000075'];
 
 const state = {
@@ -34,7 +37,8 @@ const state = {
   amc: 2,
   viewMode: 't',
   threshold: 0.1,
-  lut: buildLut(0.1),
+  lut: buildLut(0.1, true),
+  runoff: true,
   hiddenGauges: new Set(),
   probe: null,
 };
@@ -47,7 +51,8 @@ const fmtH = (s) => {
   return m ? `${h} h ${String(m).padStart(2, '0')}` : `${h} h`;
 };
 const fmtNum = (v, d = 0) => v.toLocaleString('fr-FR', { maximumFractionDigits: d, minimumFractionDigits: d });
-const fmtArea = (km2) => (km2 < 0.5 ? `${fmtNum(km2 * 100)} ha` : `${fmtNum(km2, km2 < 10 ? 1 : 0)} km²`);
+const fmtArea = (km2) =>
+  km2 < 0.01 ? 'moins d\'1 ha' : km2 < 0.5 ? `${fmtNum(km2 * 100)} ha` : `${fmtNum(km2, km2 < 10 ? 1 : 0)} km²`;
 const fmtDepth = (h) => (h < 1 ? `${fmtNum(h * 100)} cm` : `${fmtNum(h, 2)} m`);
 
 /* ---------- Paramètres saisis ---------- */
@@ -58,8 +63,9 @@ function params() {
     rainH: Math.max(0.25, Number($('rain-h').value) || 1),
     shape: $('rain-shape').value,
     amc: state.amc,
-    soil: Number($('soil').value),
-    zone: $('zone').value,
+    soil: soilGroup(),
+    soilMode: $('soil').value,
+    zone: 'study',
     res: Number($('res').value),
     tailH: Math.max(0, Number($('tail-h').value) || 0),
     burn: Math.max(0, Number($('burn').value) || 0),
@@ -68,34 +74,25 @@ function params() {
   };
 }
 
+/** Groupe de sol (1 perméable, 2 moyen, 3 peu perméable) : choisi, ou déduit du lieu. */
+function soilGroup() {
+  const v = $('soil').value;
+  return v === 'auto' ? (state.study?.soil?.group ?? 2) : Number(v);
+}
+
 function hyetoOf(p) {
   return makeHyetograph({ totalMm: p.rainMm, durationH: p.rainH, shape: p.shape });
 }
 
-/** Grille de calcul pour la zone et la résolution choisies. */
+/** Grille de calcul : bassins versants retenus autour du lieu étudié. */
 function currentGrid(p) {
-  if (p.zone === 'basin') return makeGrid(DOMAIN, p.res);
-  if (p.zone === 'study') {
-    const f = studyFrame();
-    if (!f || !studyCands().length) return null;
-    const snap = (v, fn) => fn(v / p.res) * p.res;
-    return makeGrid(
-      { xmin: snap(f.xmin, Math.floor), xmax: snap(f.xmax, Math.ceil), ymin: snap(f.ymin, Math.floor), ymax: snap(f.ymax, Math.ceil) },
-      p.res,
-    );
-  }
-  const b = state.map.getBounds();
-  const pts = [b.getSouthWest(), b.getNorthEast(), b.getNorthWest(), b.getSouthEast()].map((ll) =>
-    toL93(ll.lng, ll.lat),
+  const f = studyFrame();
+  if (!f || !studyCands().length) return null;
+  const snap = (v, fn) => fn(v / p.res) * p.res;
+  return makeGrid(
+    { xmin: snap(f.xmin, Math.floor), xmax: snap(f.xmax, Math.ceil), ymin: snap(f.ymin, Math.floor), ymax: snap(f.ymax, Math.ceil) },
+    p.res,
   );
-  const snap = (v, f) => f(v / p.res) * p.res;
-  const bbox = {
-    xmin: snap(Math.min(...pts.map((q) => q[0])), Math.floor),
-    xmax: snap(Math.max(...pts.map((q) => q[0])), Math.ceil),
-    ymin: snap(Math.min(...pts.map((q) => q[1])), Math.floor),
-    ymax: snap(Math.max(...pts.map((q) => q[1])), Math.ceil),
-  };
-  return makeGrid(bbox, p.res);
 }
 
 function chooseEngine(p, cells) {
@@ -114,43 +111,62 @@ function estimateSeconds(p, cells, engine) {
   return (cells * steps) / rate;
 }
 
+const fmtDur = (s) =>
+  s < 90 ? `${Math.max(10, Math.round(s / 10) * 10)} s` : s < 5400 ? `${Math.round(s / 60)} min` : `${Math.floor(s / 3600)} h ${String(Math.round((s % 3600) / 60)).padStart(2, '0')}`;
+
 function updateResInfo() {
-  const p = params();
-  const list = p.zone === 'basin' ? RESOLUTIONS : p.zone === 'study' ? STUDY_RESOLUTIONS : ZOOM_RESOLUTIONS;
   const sel = $('res');
   const prev = Number(sel.value);
   sel.innerHTML = '';
-  for (const r of list) {
+  for (const r of STUDY_RESOLUTIONS) {
     const o = document.createElement('option');
     o.value = r;
     o.textContent = `${r} m`;
     sel.appendChild(o);
   }
-  const def = p.zone === 'basin' ? (state.gpu ? 25 : 50) : state.gpu ? 5 : 10;
-  sel.value = list.includes(prev) ? prev : def;
-  if (p.zone === 'study') autoResForStudy();
+  sel.value = STUDY_RESOLUTIONS.includes(prev) ? prev : state.gpu ? 5 : 10;
+  autoResForStudy();
   describeRes();
 }
 
+/** Libellés des mailles avec le temps de calcul estimé, et avertissements. */
 function describeRes() {
   const p = params();
   if (!state.map) return;
+  const f = studyFrame();
+  const has = f && studyCands().length;
+  for (const o of $('res').options) {
+    const r = Number(o.value);
+    o.disabled = false;
+    if (!has) {
+      o.textContent = `${r} m`;
+      continue;
+    }
+    const cells = Math.ceil((f.xmax - f.xmin) / r) * Math.ceil((f.ymax - f.ymin) / r);
+    const q = { ...p, res: r };
+    const engine = chooseEngine(q, cells);
+    o.textContent = engine
+      ? `${r} m · environ ${fmtDur(estimateSeconds(q, cells, engine))}`
+      : `${r} m · trop de mailles pour cet appareil`;
+    o.disabled = !engine;
+  }
   const grid = currentGrid(p);
   if (!grid) {
-    $('res-info').textContent = 'Choisissez d\'abord le lieu à étudier.';
+    $('res-info').textContent = "Choisissez d'abord le lieu à étudier.";
     renderStudy();
     return;
   }
   const cells = grid.nx * grid.ny;
   const engine = chooseEngine(p, cells);
-  const km2 = ((grid.nx * grid.ny * p.res * p.res) / 1e6).toFixed(0);
-  let txt = `${fmtNum(grid.nx)} × ${fmtNum(grid.ny)} mailles (${fmtNum(cells / 1e6, 1)} M) sur ${km2} km². `;
+  let txt = `${fmtNum(cells / 1e6, 1)} M de mailles, calcul ${engine === 'gpu' ? 'sur la carte graphique' : 'sur le processeur'}.`;
   if (!engine) {
-    txt += `<span class="warn">Trop de mailles pour ${state.gpu ? 'cet appareil' : 'le calcul sans carte graphique'} : choisissez une résolution plus grossière${p.zone === 'view' ? ' ou zoomez' : ''}.</span>`;
+    txt = `<span class="warn">${fmtNum(cells / 1e6, 1)} M de mailles : trop pour la mémoire de ${state.gpu ? 'cet appareil' : 'ce navigateur sans carte graphique'}. Choisissez une maille plus grossière.</span>`;
   } else {
     const s = estimateSeconds(p, cells, engine);
-    const est = s < 90 ? `${Math.max(10, Math.round(s / 10) * 10)} s` : `${Math.round(s / 60)} min`;
-    txt += `Calcul ${engine === 'gpu' ? 'GPU' : 'CPU'}, environ ${est} (ordre de grandeur).`;
+    if (s > 900)
+      txt +=
+        ` <span class="warn">Calcul long : environ ${fmtDur(s)}.</span> Vous pouvez l'arrêter à tout moment, ` +
+        'les résultats déjà calculés sont conservés.';
   }
   $('res-info').innerHTML = txt;
   renderStudy();
@@ -231,14 +247,24 @@ function setupUi() {
     state.amc = Number(v);
     updateRainInfo();
   });
-  seg('view-mode', (v) => {
-    state.viewMode = v;
+  $('show-max').onclick = () => {
+    setViewMode(state.viewMode === 'max' ? 't' : 'max');
+    renderCurrent();
+  };
+  $('res-min').onclick = () => {
+    const min = $('results-dock').classList.toggle('min');
+    $('res-min').textContent = min ? '▴' : '▾';
+    if (!min) drawHydro();
+  };
+  $('runoff').addEventListener('change', () => {
+    state.runoff = $('runoff').checked;
+    state.lut = buildLut(FLOOD_THRESHOLD, state.runoff);
     renderCurrent();
   });
+  $('soil').addEventListener('input', renderSoilInfo);
 
   for (const id of ['rain-mm', 'rain-h', 'rain-shape', 'soil', 'cnf']) $(id).addEventListener('input', updateRainInfo);
   for (const id of ['rain-h', 'tail-h', 'res', 'engine']) $(id).addEventListener('input', describeRes);
-  $('zone').addEventListener('input', updateResInfo);
 
   $('run').onclick = () => (state.run?.running ? stopRun() : startRun());
   $('clear-cache').onclick = async () => {
@@ -248,18 +274,8 @@ function setupUi() {
   };
 
   $('time').addEventListener('input', () => {
-    if (state.viewMode !== 't') {
-      state.viewMode = 't';
-      $('view-mode').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x.dataset.v === 't'));
-    }
+    setViewMode('t');
     if (state.run) state.run.follow = Number($('time').value) === Number($('time').max);
-    renderCurrent();
-  });
-  $('thr').addEventListener('input', () => {
-    state.threshold = Number($('thr').value) / 100;
-    $('thr-label').textContent = `${$('thr').value} cm`;
-    state.lut = buildLut(state.threshold);
-    state.water3d?.setThreshold(state.threshold);
     renderCurrent();
   });
   $('relief3d').addEventListener('change', () => toggle3d($('relief3d').checked));
@@ -286,7 +302,7 @@ function setupUi() {
   refreshSaved();
 
   $('legend').innerHTML = LEGEND.map(
-    (l) => `<span><i style="background:rgb(${l.color.join(',')})"></i>${l.label}</span>`,
+    (l) => `<span${l.runoff ? ' class="runoff-sw"' : ''}><i style="background:rgb(${l.color.join(',')})"></i>${l.label}</span>`,
   ).join('');
 
   document.querySelectorAll('[data-layer]').forEach((cb) =>
@@ -302,6 +318,18 @@ function setupUi() {
     updateRainInfo();
     drawHydro();
   });
+}
+
+/** « Heure par heure » (t) ou « maximum atteint » (max). */
+function setViewMode(v) {
+  state.viewMode = v;
+  $('show-max').classList.toggle('on', v === 'max');
+}
+
+/** Fenêtre des résultats : affichée dès qu'une simulation commence ou est rouverte. */
+function showResults(on) {
+  $('results-dock').hidden = !on;
+  if (on) drawHydro();
 }
 
 function setLayerVisible(name, on) {
@@ -550,7 +578,7 @@ async function startRun() {
   state.run = run;
   $('run').textContent = 'Arrêter';
   $('run').classList.add('stop');
-  $('results').hidden = true;
+  showResults(false);
   prog.start();
   const cached = state.data?.key === JSON.stringify([grid.xmin, grid.ymin, grid.nx, grid.ny, grid.dx, p.burn]);
   if (!cached) prog.status(CONNECTING);
@@ -591,7 +619,8 @@ async function startRun() {
     const snapshotEvery = Math.max(600, Math.ceil(totalTime / 150 / 300) * 300);
     run.totalTime = totalTime;
     run.hyeto = hyeto;
-    $('results').hidden = false;
+    showResults(true);
+    setViewMode('t');
     $('time').max = 0;
     $('time').value = 0;
     drawHydro();
@@ -817,10 +846,7 @@ function togglePlay() {
   if (playTimer) return stopPlay();
   const run = state.run;
   if (!run?.store.length) return;
-  if (state.viewMode !== 't') {
-    state.viewMode = 't';
-    $('view-mode').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x.dataset.v === 't'));
-  }
+  setViewMode('t');
   if (Number($('time').value) >= Number($('time').max)) $('time').value = 0;
   $('play').textContent = '❚❚';
   syncDock();
@@ -910,7 +936,8 @@ function setupMapTip() {
     if (!c) return (tip.hidden = true);
     const h = dequantize(state.lastQ[c.k]);
     const hm = run.maxima ? run.maxima.hmax[c.k] : 0;
-    if (h < state.threshold && hm < state.threshold) return (tip.hidden = true);
+    const thr = state.runoff ? 0.01 : FLOOD_THRESHOLD;
+    if (h < thr && hm < thr) return (tip.hidden = true);
     const when = state.viewMode === 'max' ? 'maximum atteint' : `à ${$('time-label').textContent}`;
     let html = h >= 0.01 ? `<b>${fmtD(h)}</b> d'eau ${when}` : `Pas d'eau ${when}`;
     if (run.maxima && state.viewMode !== 'max' && hm >= 0.01) html += `<br>max ${fmtD(hm)} à ${fmtH(run.maxima.tmax[c.k])}`;
@@ -980,7 +1007,7 @@ function setupSearch() {
     }
     state.searchMarker.setLngLat([r.x, r.y]).addTo(state.map);
     // En mode « lieu étudié », le lieu cherché est analysé directement.
-    if (params().zone === 'study' && !state.run?.running) studyPlace(r.x, r.y);
+    if (!state.run?.running) studyPlace(r.x, r.y);
     if (window.matchMedia('(max-width: 760px)').matches) $('panel').classList.add('collapsed');
   };
   const search = async (text) => {
@@ -1048,6 +1075,86 @@ function candidateVerdict(c) {
   return { level: 'muted', text: 'lieu nettement au-dessus du lit : débordement peu probable' };
 }
 
+/* ---------- Type de sol automatique (texture SoilGrids, ISRIC) ---------- */
+
+const SOIL_LABEL = { 1: 'perméable', 2: 'moyen', 3: 'peu perméable' };
+
+/** Texture (argile, sable en %) d'un point, d'après SoilGrids (surface et 30-60 cm). */
+async function soilTexture(lon, lat) {
+  const q = new URLSearchParams({ lon: lon.toFixed(5), lat: lat.toFixed(5), value: 'mean' });
+  for (const pr of ['clay', 'sand']) q.append('property', pr);
+  for (const d of ['0-5cm', '30-60cm']) q.append('depth', d);
+  const res = await fetchWithTimeout(`https://rest.isric.org/soilgrids/v2.0/properties/query?${q}`, 25000);
+  if (!res.ok) throw new Error(`SoilGrids HTTP ${res.status}`);
+  const layers = (await res.json()).properties?.layers || [];
+  const get = (name) =>
+    (layers.find((l) => l.name === name)?.depths || []).map((d) => d.values?.mean).filter((v) => v != null).map((v) => v / 10);
+  const clay = get('clay');
+  const sand = get('sand');
+  if (!clay.length) return null; // zone urbaine, eau… : pas de donnée
+  return { clay: Math.max(...clay), sand: sand.length ? sand[0] : null };
+}
+
+/**
+ * Groupe hydrologique (méthode SCS) déduit de la texture : l'argile (horizon le plus argileux)
+ * freine l'infiltration. < 20 % : perméable (B) ; 20-40 % : moyen (C) ; > 40 % : peu perméable (D).
+ */
+const soilGroupOf = (clay) => (clay < 20 ? 1 : clay <= 40 ? 2 : 3);
+
+/** Texture moyenne du lieu étudié et de ses bassins (quelques points, pondérés par la surface). */
+async function fetchSoil() {
+  const s = state.study;
+  if (!s) return;
+  s.soil = { pending: true };
+  renderSoilInfo();
+  const pts = [{ ll: s.houseWgs, w: 0.3 }];
+  for (const c of studyCands().filter((c) => c.kind === 'stream').slice(0, 3)) {
+    const b = c.bbox;
+    pts.push({ ll: toWgs((b.xmin + b.xmax) / 2, (b.ymin + b.ymax) / 2), w: Math.max(0.3, c.areaKm2) });
+  }
+  let sw = 0;
+  let clay = 0;
+  let sand = 0;
+  let sandW = 0;
+  for (const pt of pts) {
+    try {
+      const t = await soilTexture(pt.ll[0], pt.ll[1]);
+      if (!t) continue;
+      sw += pt.w;
+      clay += pt.w * t.clay;
+      if (t.sand != null) {
+        sand += pt.w * t.sand;
+        sandW += pt.w;
+      }
+    } catch (e) {
+      console.warn('Texture du sol indisponible', e);
+    }
+  }
+  if (state.study !== s) return;
+  s.soil = sw ? { group: soilGroupOf(clay / sw), clay: clay / sw, sand: sandW ? sand / sandW : null } : { failed: true };
+  saveStudy();
+  renderSoilInfo();
+  updateRainInfo();
+}
+
+function renderSoilInfo() {
+  const el = $('soil-info');
+  const mode = $('soil').value;
+  if (mode !== 'auto') {
+    el.innerHTML = `Type de sol : <strong>${SOIL_LABEL[mode]}</strong> (choisi dans les options avancées).`;
+    return;
+  }
+  const soil = state.study?.soil;
+  if (!state.study) el.textContent = 'Type de sol : déduit automatiquement du lieu étudié.';
+  else if (soil?.pending) el.textContent = 'Recherche de la texture du sol…';
+  else if (soil?.group)
+    el.innerHTML =
+      `Type de sol : <strong>${SOIL_LABEL[soil.group]}</strong>, d'après sa texture ` +
+      `(argile ${fmtNum(soil.clay)} %${soil.sand != null ? `, sable ${fmtNum(soil.sand)} %` : ''} ; SoilGrids). ` +
+      'Modifiable dans les options avancées.';
+  else el.textContent = 'Type de sol : moyen (texture du sol indisponible ici). Modifiable dans les options avancées.';
+}
+
 /** Choix par défaut : les cours d'eau dont un débordement peut atteindre le lieu. */
 function defaultChecked(c) {
   if (c.kind === 'slope') return true;
@@ -1087,22 +1194,6 @@ function studyFrame() {
 }
 
 function setupCatchment() {
-  const sync = () => {
-    const z = params().zone;
-    $('catch-box').hidden = z !== 'study';
-    $('zone-hint').textContent =
-      z === 'study'
-        ? "Choisissez un lieu n'importe où en France : l'application repère les cours d'eau qui peuvent " +
-          "l'atteindre, délimite leurs bassins versants et ne simule que ceux-là (la pluie ne tombe que dessus)."
-        : z === 'view'
-          ? 'Simulation fine de la partie visible de la carte, pluie sur toute la zone. ' +
-            "L'eau venant de l'amont hors écran n'est pas comptée."
-          : "Préréglage : tout le bassin de l'Arc jusqu'à Aix (Pont de l'Arc) avec ses affluents, " +
-            "débits suivis le long de l'Arc et des principaux vallats.";
-    if (state.map) describeRes();
-  };
-  $('zone').addEventListener('input', sync);
-  sync();
   $('catch-pick').onclick = () => setCatchMode(!state.catchMode);
   $('catch-fit').onclick = fitStudy;
   $('catch-clear').onclick = clearStudy;
@@ -1128,7 +1219,9 @@ function restoreCatchment() {
   if (state.study) {
     showStudy();
     renderStudy();
+    if (!state.study.soil?.group) fetchSoil();
   }
+  renderSoilInfo();
 }
 
 function setCatchMode(on) {
@@ -1193,6 +1286,7 @@ function studyPlace(lng, lat) {
       autoResForStudy();
       renderStudy();
       describeRes();
+      fetchSoil();
       if (window.matchMedia('(max-width: 760px)').matches) $('panel').classList.remove('collapsed');
     } else if (m.type === 'error') {
       end();
@@ -1233,6 +1327,7 @@ function renderStudy() {
   const s = state.study;
   const list = $('catch-list');
   const info = $('catch-info');
+  $('catch-empty').hidden = !!s || !!state.catchWorker;
   if (state.catchMode || state.catchWorker) return;
   list.innerHTML = '';
   if (!s) {
@@ -1282,7 +1377,7 @@ function renderStudy() {
 
 /** Choisit la maille la plus fine possible pour le lieu étudié. */
 function autoResForStudy() {
-  if (params().zone !== 'study' || !studyCands().length) return;
+  if (!studyCands().length) return;
   const r = finestResFor(params(), studyFrame());
   if (r) $('res').value = r;
 }
@@ -1298,6 +1393,7 @@ function clearStudy() {
   $('catch-list').innerHTML = '';
   $('catch-info').textContent = '';
   describeRes();
+  renderSoilInfo();
 }
 
 /**
@@ -1350,6 +1446,7 @@ function setupSection() {
     setGeoJson(state.map, 'section', null);
     setGeoJson(state.map, 'section-hover', null);
     $('section-dock').hidden = true;
+    $('results-dock').classList.remove('with-section');
     $('section-auto').disabled = true;
     $('section-clear').disabled = true;
   };
@@ -1381,12 +1478,6 @@ function setupSection() {
     $('dock-min').textContent = min ? '▴' : '▾';
     if (!min) redrawSection(false);
   };
-  $('dock-play').onclick = () => togglePlay();
-  $('dock-max').onclick = () => $('view-mode').querySelector('button[data-v="max"]').click();
-  $('dock-time').addEventListener('input', () => {
-    $('time').value = $('dock-time').value;
-    $('time').dispatchEvent(new Event('input'));
-  });
   const cv = $('section-canvas');
   const hover = (clientX) => {
     const sec = state.section;
@@ -1423,12 +1514,7 @@ function setupSection() {
 /** Recopie l'état du curseur de temps principal dans le panneau de coupe. */
 function syncDock() {
   if (!$('section-dock') || $('section-dock').hidden) return;
-  $('dock-time').max = $('time').max;
-  $('dock-time').value = $('time').value;
-  const isMax = state.viewMode === 'max';
-  $('dock-time-label').textContent = isMax ? 'max' : $('time-label').textContent;
-  $('dock-max').classList.toggle('on', isMax);
-  $('dock-play').textContent = $('play').textContent;
+  $('dock-time-label').textContent = state.viewMode === 'max' ? 'maximum atteint' : `à ${$('time-label').textContent}`;
 }
 
 /** Direction (vecteur unitaire L93) du curseur « avancer / reculer » : perpendiculaire à la coupe. */
@@ -1487,6 +1573,12 @@ function placeSection(lngLat) {
   }
   $('section-dock').hidden = false;
   $('section-dock').classList.remove('min');
+  $('results-dock').classList.add('with-section');
+  // Sur téléphone, la fenêtre des résultats se réduit à sa barre de temps pour laisser voir la coupe.
+  if (window.matchMedia('(max-width: 760px)').matches) {
+    $('results-dock').classList.add('min');
+    $('res-min').textContent = '▴';
+  }
   syncDock();
   $('section-auto').disabled = false;
   $('section-clear').disabled = false;
@@ -1757,7 +1849,7 @@ async function openSaved(id) {
     $('rain-mm').value = p.rainMm;
     $('rain-h').value = p.rainH;
     $('rain-shape').value = p.shape;
-    $('soil').value = p.soil;
+    $('soil').value = p.soilMode || String(p.soil);
     state.amc = p.amc;
     $('amc').querySelectorAll('button').forEach((b) => b.classList.toggle('on', Number(b.dataset.v) === p.amc));
     $('tail-h').value = p.tailH;
@@ -1804,11 +1896,10 @@ async function openSaved(id) {
     fitBoundsOf(state.map, gridCornersWgs(grid));
 
     $('gauge-legend').innerHTML = '';
-    $('results').hidden = false;
+    showResults(true);
     $('time').max = Math.max(0, store.length - 1);
     $('time').value = $('time').max;
-    state.viewMode = 'max';
-    $('view-mode').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x.dataset.v === 'max'));
+    setViewMode('max');
     $('summary').innerHTML = r.summary || '';
     if ($('save-note')) $('save-note').textContent = `Simulation enregistrée le ${new Date(meta.created).toLocaleString('fr-FR')}.`;
     await renderCurrent();
@@ -1816,7 +1907,6 @@ async function openSaved(id) {
     for (const k of Object.keys(STEPS)) prog.set(k, 1, 'enregistré');
     prog.finish(`Simulation rouverte : ${meta.name}`);
     refreshSaved();
-    $('results').scrollIntoView({ block: 'start', behavior: 'smooth' });
   } catch (e) {
     console.error(e);
     prog.error(`Ouverture impossible : ${e.message || e}`);
@@ -1870,9 +1960,6 @@ async function main() {
     if (det) det.open = true;
   }
   updateResInfo();
-  state.map.on('moveend', () => {
-    if (params().zone === 'view') describeRes();
-  });
   restoreCatchment();
   state.map.on('click', (e) => {
     if (state.catchMode) studyPlace(e.lngLat.lng, e.lngLat.lat);
@@ -1883,7 +1970,7 @@ async function main() {
   // Accès à l'état depuis la console du navigateur (diagnostic).
   window.floodApp = state;
   state.water3d = new Water3DLayer();
-  state.water3d.setThreshold(state.threshold);
+  state.water3d.setThreshold(FLOOD_THRESHOLD);
   state.map.addLayer(state.water3d, 'rivers');
   state.ctrl3d = new Toggle3dControl((on) => toggle3d(on));
   state.map.addControl(state.ctrl3d, 'top-right');

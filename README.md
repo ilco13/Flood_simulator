@@ -6,24 +6,18 @@ Application web qui simule la montée des eaux **autour d'un lieu choisi n'impor
 
 ## Utilisation
 
-Le champ en haut du panneau cherche un lieu, une adresse ou un cours d'eau (géocodage IGN) et y centre la carte.
-
-1. Saisir le **cumul de pluie** (mm) et la **durée** (h), puis choisir la répartition dans le temps.
-2. Choisir l'**humidité du sol** avant l'épisode (sec, normal ou saturé) et le type de sol.
-3. Choisir la **zone** :
-   - *Bassins versants du lieu étudié* (par défaut) : rechercher un lieu ou cliquer « Choisir le lieu étudié » puis sur la carte. L'application liste les cours d'eau à moins de 600 m (BD TOPO), avec pour chacun la distance, le **dénivelé entre le lieu et le lit** et la surface de son **bassin versant amont**, plus le ruissellement du versant qui domine le lieu. Elle coche ceux dont un débordement peut atteindre le lieu (dénivelé inférieur à une tolérance qui croît avec la taille du bassin) ; on peut cocher ou décocher. La simulation porte sur l'union des bassins cochés, à la maille la plus fine que l'appareil calcule en une dizaine de minutes, avec un point de suivi du débit au droit du lieu pour chaque cours d'eau. Les très grands bassins (> 2 000 km², ex. Rhône, Loire) relèvent d'un modèle fluvial et ne sont pas proposés ;
-   - *Zone affichée* : la portion visible de la carte, en détail fin (jusqu'à 1 m), pluie sur toute la zone. L'eau venant de l'amont hors écran n'y est pas comptée ;
-   - *Préréglage haute vallée de l'Arc* : tout le bassin, de Pourrières à Aix (Pont de l'Arc), à 50, 25, 15, 10 ou 5 m.
-4. **Lancer la simulation**. L'eau apparaît au fil du calcul.
-5. Explorer les résultats :
-   - curseur temporel et lecture animée ;
-   - vue « maximum atteint » ;
-   - débits aux points de suivi (Arc à Trets, Rousset, Châteauneuf, Meyreuil, Aix ; Verdalaï, Longarel, Bayeux, Cause) ;
-   - en touchant la carte : hauteur d'eau, maximum, heure du pic et vitesse en ce point ;
-   - **bulle au survol de la carte** : hauteur d'eau sous la souris à l'heure affichée, maximum atteint et son heure ;
-   - **coupe en travers** : « Placer une coupe » puis clic sur la carte ; la coupe s'affiche dans un panneau flottant en bas de la carte, avec son propre curseur de temps et bouton lecture ; orientation (auto = perpendiculaire au vallon) et largeur réglables ; poignée « main » au centre pour la déplacer sur la carte sans la modifier, et curseur « Avancer / reculer » pour la faire glisser perpendiculairement à son tracé (le long du cours d'eau). Le terrain est tiré du LiDAR HD à pleine résolution (jusqu'à 0,5 m), l'eau suit le curseur de temps, le niveau maximal est en pointillé, et le survol donne altitude et hauteur d'eau ;
-   - **simulations enregistrées** : chaque simulation terminée est enregistrée automatiquement dans le navigateur (IndexedDB) et peut être rouverte sans recalcul, renommée, supprimée, ou exportée en fichier `.crue` pour l'ouvrir sur un autre ordinateur (bouton « Importer un fichier .crue ») ;
-   - **vue 3D** (bouton « 3D » de la carte ou case « Relief 3D ») : relief LiDAR HD en relief, photo aérienne drapée, et nappe d'eau en volume posée à la cote « sol + hauteur d'eau », animée avec le curseur de temps. Exagération du relief réglable (×1 à ×4).
+1. **Lieu étudié** : chercher un lieu, une adresse ou un cours d'eau (champ en haut du panneau, géocodage IGN), ou toucher « Choisir le lieu étudié » puis la carte. L'application liste les cours d'eau à moins de 600 m (BD TOPO), avec pour chacun la distance, le **dénivelé entre le lieu et le lit** et la surface de son **bassin versant amont**, plus le ruissellement du versant qui domine le lieu. Elle coche ceux dont un débordement peut atteindre le lieu (dénivelé inférieur à une tolérance qui croît avec la taille du bassin) ; on peut cocher ou décocher. La simulation porte sur l'union des bassins cochés et la pluie ne tombe que dessus, avec un point de suivi du débit au droit du lieu pour chaque cours d'eau. Les très grands bassins (> 2 000 km², ex. Rhône, Loire) relèvent d'un modèle fluvial et ne sont pas proposés.
+2. **Pluie** : cumul (mm) et durée (h). Répartition dans le temps : Chicago par défaut (modifiable dans les options avancées).
+3. **Sol** : humidité avant l'épisode (sec, normal, saturé). Le type de sol est **déduit automatiquement** de la texture du sol (SoilGrids, ISRIC : taux d'argile et de sable au lieu et au centre des bassins) ; il peut être forcé dans les options avancées.
+4. **Maille de calcul** : chaque maille affiche son temps de calcul estimé. La plus fine calculable en une dizaine de minutes est choisie d'office ; une maille plus fine reste possible (avertissement si le calcul est long, arrêt possible à tout moment avec résultats partiels conservés). Seules les mailles qui dépassent la mémoire de l'appareil sont refusées.
+5. **Lancer la simulation**. Les résultats s'ouvrent dans une **fenêtre flottante en haut à gauche de la carte**, avec **une seule barre de temps** (lecture, « Max ») qui pilote la carte, les débits et la coupe :
+   - légende des hauteurs et case **« Ruissellement »** : la lame d'eau de 1 à 10 cm est dessinée en turquoise, distincte de l'inondation (bleu, à partir de 10 cm) ;
+   - débits aux points de suivi ;
+   - en touchant la carte : hauteur d'eau, maximum, heure du pic et vitesse en ce point ; **bulle au survol** de la carte ;
+   - **coupe en travers** : « Placer une coupe » puis clic sur la carte ; la coupe s'affiche dans un panneau flottant en bas de la carte ; orientation (auto = perpendiculaire au vallon) et largeur réglables ; poignée « main » au centre pour la déplacer sans la modifier, et curseur « Avancer / reculer » pour la faire glisser le long du cours d'eau. Terrain LiDAR HD à pleine résolution (jusqu'à 0,5 m), surface d'eau plate propagée sur le terrain fin, niveau maximal en pointillé ;
+   - « Bilan du calcul » (surfaces inondées, pics de débit, bilan de masse).
+6. **Simulations enregistrées** : chaque simulation terminée est enregistrée dans le navigateur et peut être rouverte sans recalcul, renommée, supprimée, ou exportée en fichier `.crue`.
+7. **Options avancées** : répartition de la pluie, type de sol forcé, durée simulée après la pluie, gravure du réseau, calage, moteur de calcul, couches de la carte, **vue 3D** (relief LiDAR HD et nappe d'eau en volume, aussi via le bouton « 3D » de la carte).
 
 Le calcul tourne **dans le navigateur**, sur la carte graphique (WebGPU) quand elle est disponible, sinon sur le processeur, plus lentement et à une résolution plus grossière. Aucun serveur de calcul n'est nécessaire. Les données IGN sont chargées à la demande, puis gardées en cache dans le navigateur.
 
@@ -35,6 +29,7 @@ Le calcul tourne **dans le navigateur**, sur la carte graphique (WebGPU) quand e
 | Occupation du sol | `IGNF_COSIA_2024-2026` (IA, 20 cm), complété par les millésimes 2021-2023 puis 2017-2020 | coefficient de ruissellement (CN) et rugosité (Manning) |
 | Cours d'eau | `BDTOPO_V3:troncon_hydrographique` (WFS) | gravure des vallats dans le relief, points de suivi, affichage |
 | Fond de carte | BD ORTHO (WMTS) + Plan IGN vectoriel (routes, noms) | vue « hybride » |
+| Texture du sol | SoilGrids (ISRIC, API REST) : argile et sable, 0-5 et 30-60 cm | groupe hydrologique du sol (< 20 % d'argile : perméable ; 20-40 % : moyen ; > 40 % : peu perméable) |
 
 ## Modèle
 

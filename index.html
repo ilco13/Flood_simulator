@@ -26,6 +26,23 @@
 
         <div class="scroll">
           <section>
+            <h2>Lieu étudié</h2>
+            <p id="catch-empty" class="hint">
+              Cherchez un lieu ci-dessus ou touchez « Choisir le lieu étudié » puis la carte : l'application repère
+              les cours d'eau qui peuvent l'atteindre et délimite leurs bassins versants.
+            </p>
+            <div id="catch-box">
+              <div class="btn-row">
+                <button id="catch-pick" class="ghost" type="button">Choisir le lieu étudié</button>
+                <button id="catch-fit" class="ghost" type="button" disabled>Cadrer</button>
+                <button id="catch-clear" class="ghost" type="button" disabled>Effacer</button>
+              </div>
+              <ul id="catch-list" class="catch-list"></ul>
+              <p id="catch-info" class="hint"></p>
+            </div>
+          </section>
+
+          <section>
             <h2>Pluie</h2>
             <div class="row2">
               <label>Cumul (mm)
@@ -39,9 +56,6 @@
               <div class="chips" data-target="rain-mm" data-values="50,100,150,200,300"></div>
               <div class="chips" data-target="rain-h" data-values="1,3,6,12,24,48"></div>
             </div>
-            <label>Répartition dans le temps
-              <select id="rain-shape"></select>
-            </label>
             <canvas id="hyeto" class="chart small" aria-label="Hyétogramme"></canvas>
             <p id="rain-info" class="hint"></p>
           </section>
@@ -54,59 +68,15 @@
               <button data-v="2" role="radio" class="on">Normal</button>
               <button data-v="3" role="radio">Saturé</button>
             </div>
-            <label>Type de sol dominant
-              <select id="soil">
-                <option value="1">Perméable (sables, éboulis, calcaires fissurés)</option>
-                <option value="2" selected>Moyen : argilo-calcaire (défaut Provence)</option>
-                <option value="3">Peu perméable (argiles, marnes, roche)</option>
-              </select>
-            </label>
+            <p id="soil-info" class="hint"></p>
           </section>
 
           <section>
             <h2>Calcul</h2>
-            <label>Zone
-              <select id="zone">
-                <option value="study">Bassins versants du lieu étudié (partout en France)</option>
-                <option value="view">Zone affichée à l'écran</option>
-                <option value="basin">Préréglage : haute vallée de l'Arc</option>
-              </select>
-            </label>
-            <p id="zone-hint" class="hint"></p>
-            <div id="catch-box" hidden>
-              <div class="btn-row">
-                <button id="catch-pick" class="ghost" type="button">Choisir le lieu étudié</button>
-                <button id="catch-fit" class="ghost" type="button" disabled>Cadrer</button>
-                <button id="catch-clear" class="ghost" type="button" disabled>Effacer</button>
-              </div>
-              <ul id="catch-list" class="catch-list"></ul>
-              <p id="catch-info" class="hint"></p>
-            </div>
-            <label>Résolution
+            <label>Maille de calcul
               <select id="res"></select>
             </label>
             <p id="res-info" class="hint"></p>
-            <label>Durée simulée après la fin de la pluie (h)
-              <input id="tail-h" type="number" inputmode="decimal" value="8" min="0" max="72" step="1" />
-            </label>
-            <details>
-              <summary>Options avancées</summary>
-              <label>Gravure du réseau BD TOPO dans le relief (m)
-                <input id="burn" type="number" inputmode="decimal" value="1" min="0" max="3" step="0.25" />
-              </label>
-              <label>Calage : multiplicateur de la rétention du sol
-                <input id="cnf" type="number" inputmode="decimal" value="1" min="0.2" max="3" step="0.1" />
-              </label>
-              <label>Moteur de calcul
-                <select id="engine">
-                  <option value="auto">Automatique</option>
-                  <option value="gpu">Carte graphique (WebGPU)</option>
-                  <option value="cpu">Processeur</option>
-                </select>
-              </label>
-              <p id="engine-info" class="hint"></p>
-              <button id="clear-cache" class="ghost">Vider le cache des données</button>
-            </details>
             <button id="run" class="primary">Lancer la simulation</button>
             <div id="progress" hidden aria-live="polite">
               <div class="prog-head">
@@ -125,85 +95,114 @@
             </div>
           </section>
 
-          <section id="results" hidden>
-            <h2>Résultats</h2>
-            <div class="seg" id="view-mode" role="radiogroup">
-              <button data-v="t" class="on" role="radio">Heure par heure</button>
-              <button data-v="max" role="radio">Maximum atteint</button>
-            </div>
-            <div class="timeline">
-              <button id="play" class="icon" aria-label="Lecture">▶</button>
-              <input id="time" type="range" min="0" max="0" value="0" aria-label="Temps" />
-              <span id="time-label">0 h</span>
-            </div>
-            <label>Masquer l'eau en dessous de <span id="thr-label">10 cm</span>
-              <input id="thr" type="range" min="1" max="50" value="10" />
-            </label>
-            <div id="legend" class="legend"></div>
-            <h3>Débits aux points de suivi (m³/s)</h3>
-            <canvas id="hydro" class="chart" aria-label="Hydrogrammes"></canvas>
-            <div id="gauge-legend" class="legend gauges"></div>
-            <h3>Point de la carte</h3>
-            <p id="probe-info" class="hint">Touchez la carte pour connaître la hauteur d'eau en un point.</p>
-            <canvas id="probe-chart" class="chart small" hidden aria-label="Hauteur d'eau au point"></canvas>
-            <h3>Coupe en travers</h3>
-            <p id="section-hint" class="hint">Placez une coupe pour voir l'eau monter à un endroit précis : elle s'affiche en bas de la carte.</p>
-            <div class="btn-row">
-              <button id="section-place" class="ghost" type="button">Placer une coupe</button>
-              <button id="section-auto" class="ghost" type="button" disabled>Orientation auto</button>
-              <button id="section-clear" class="ghost" type="button" disabled>Effacer</button>
-            </div>
-            <p id="summary" class="hint"></p>
-          </section>
-
           <section id="saved">
             <h2>Simulations enregistrées</h2>
-            <p class="hint">
-              Chaque simulation terminée est enregistrée dans ce navigateur. Exportez-la en fichier
-              « .crue » pour la rouvrir sur un autre ordinateur.
-            </p>
             <ul id="saved-list" class="saved"></ul>
             <label class="ghost file-btn">Importer un fichier .crue<input type="file" id="import-file" accept=".crue" hidden /></label>
           </section>
 
           <section>
-            <h2>Couches</h2>
-            <label class="check"><input type="checkbox" data-layer="water" checked /> Eau simulée</label>
-            <label class="check"><input type="checkbox" data-layer="rivers" checked /> Cours d'eau (BD TOPO)</label>
-            <label class="check"><input type="checkbox" data-layer="basin" checked /> Limite du bassin versant</label>
-            <label class="check"><input type="checkbox" data-layer="labels" checked /> Routes et noms de lieux</label>
-            <label class="check"><input type="checkbox" data-layer="shadow" /> Ombrage du relief</label>
-            <label class="check"><input type="checkbox" id="relief3d" /> Relief 3D et nappe d'eau en volume</label>
-            <label>Exagération du relief <span id="exag-label">×1.5</span>
-              <input id="exag" type="range" min="1" max="4" step="0.1" value="1.5" />
-            </label>
-            <p class="hint">En 3D : deux doigts (ou clic droit) pour incliner et tourner la vue.</p>
+            <details class="advanced">
+              <summary>Options avancées</summary>
+              <label>Répartition de la pluie dans le temps
+                <select id="rain-shape"></select>
+              </label>
+              <label>Type de sol
+                <select id="soil">
+                  <option value="auto" selected>Automatique (d'après la texture du sol)</option>
+                  <option value="1">Perméable (sables, éboulis, calcaires fissurés)</option>
+                  <option value="2">Moyen (limons, argilo-calcaire)</option>
+                  <option value="3">Peu perméable (argiles, marnes, roche)</option>
+                </select>
+              </label>
+              <label>Durée simulée après la fin de la pluie (h)
+                <input id="tail-h" type="number" inputmode="decimal" value="8" min="0" max="72" step="1" />
+              </label>
+              <label>Gravure du réseau BD TOPO dans le relief (m)
+                <input id="burn" type="number" inputmode="decimal" value="1" min="0" max="3" step="0.25" />
+              </label>
+              <label>Calage : multiplicateur de la rétention du sol
+                <input id="cnf" type="number" inputmode="decimal" value="1" min="0.2" max="3" step="0.1" />
+              </label>
+              <label>Moteur de calcul
+                <select id="engine">
+                  <option value="auto">Automatique</option>
+                  <option value="gpu">Carte graphique (WebGPU)</option>
+                  <option value="cpu">Processeur</option>
+                </select>
+              </label>
+              <p id="engine-info" class="hint"></p>
+              <h3>Couches de la carte</h3>
+              <label class="check"><input type="checkbox" data-layer="water" checked /> Eau simulée</label>
+              <label class="check"><input type="checkbox" data-layer="rivers" checked /> Cours d'eau (BD TOPO)</label>
+              <label class="check"><input type="checkbox" data-layer="basin" checked /> Limite du bassin simulé</label>
+              <label class="check"><input type="checkbox" data-layer="labels" checked /> Routes et noms de lieux</label>
+              <label class="check"><input type="checkbox" data-layer="shadow" /> Ombrage du relief</label>
+              <label class="check"><input type="checkbox" id="relief3d" /> Relief 3D et nappe d'eau en volume</label>
+              <label>Exagération du relief en 3D <span id="exag-label">×1.5</span>
+                <input id="exag" type="range" min="1" max="4" step="0.1" value="1.5" />
+              </label>
+              <button id="clear-cache" class="ghost">Vider le cache des données</button>
+            </details>
           </section>
 
           <section class="about">
-            <h2>À savoir</h2>
-            <p>
-              Outil pédagogique et exploratoire. <strong>Il ne remplace ni le PPRI, ni Vigicrues, ni les
-              consignes des autorités.</strong> La pluie est supposée uniforme sur toute la zone, et les ouvrages
-              (buses, bassins de rétention, digues) ne sont représentés qu'à travers le relief.
-            </p>
-            <p>
-              Données IGN : relief LiDAR HD (MNT 0,5 m), occupation du sol COSIA, BD TOPO, BD ORTHO et Plan IGN.
-              Modèle : ruissellement SCS-CN, écoulement 2D « inertie locale » (Bates 2010, de Almeida 2012).
-            </p>
+            <details>
+              <summary>À savoir</summary>
+              <p>
+                Outil pédagogique et exploratoire. <strong>Il ne remplace ni le PPRI, ni Vigicrues, ni les
+                consignes des autorités.</strong> La pluie est supposée uniforme sur toute la zone, et les ouvrages
+                (buses, bassins de rétention, digues) ne sont représentés qu'à travers le relief.
+              </p>
+              <p>
+                Données IGN : relief LiDAR HD, occupation du sol COSIA, BD TOPO, BD ORTHO, Plan IGN ; texture du sol
+                SoilGrids (ISRIC). Modèle : ruissellement SCS-CN, écoulement 2D « inertie locale »
+                (Bates 2010, de Almeida 2012). En 3D : deux doigts (ou clic droit) pour incliner et tourner la vue.
+              </p>
+            </details>
           </section>
         </div>
       </aside>
       <main id="map">
         <div id="map-status" hidden></div>
         <div id="map-tip" hidden></div>
+        <div id="results-dock" hidden>
+          <div class="dock-head">
+            <button id="play" class="icon sm" type="button" aria-label="Lecture">▶</button>
+            <input id="time" type="range" min="0" max="0" value="0" aria-label="Heure" />
+            <span id="time-label">0 h</span>
+            <button id="show-max" class="chip-btn" type="button" title="Hauteur maximale atteinte">Max</button>
+            <button id="res-min" class="icon-ghost" type="button" title="Réduire / agrandir">▾</button>
+          </div>
+          <div class="rdock-body">
+            <div class="legend-row">
+              <div id="legend" class="legend"></div>
+              <label class="check small"><input type="checkbox" id="runoff" checked /> Ruissellement</label>
+            </div>
+            <h3>Débits (m³/s)</h3>
+            <canvas id="hydro" class="chart" aria-label="Hydrogrammes"></canvas>
+            <div id="gauge-legend" class="legend gauges"></div>
+            <h3>Point de la carte</h3>
+            <p id="probe-info" class="hint">Touchez la carte pour connaître la hauteur d'eau en un point.</p>
+            <canvas id="probe-chart" class="chart small" hidden aria-label="Hauteur d'eau au point"></canvas>
+            <h3>Coupe en travers</h3>
+            <div class="btn-row">
+              <button id="section-place" class="ghost" type="button">Placer une coupe</button>
+              <button id="section-auto" class="ghost" type="button" disabled>Orientation auto</button>
+              <button id="section-clear" class="ghost" type="button" disabled>Effacer</button>
+            </div>
+            <p id="section-hint" class="hint">Touchez « Placer une coupe » puis la carte (par exemple dans le lit du cours d’eau).</p>
+            <details class="summary-box">
+              <summary>Bilan du calcul</summary>
+              <p id="summary" class="hint"></p>
+            </details>
+          </div>
+        </div>
         <div id="section-dock" hidden>
           <div class="dock-head">
             <strong class="dock-title">Coupe</strong>
-            <button id="dock-play" class="icon sm" type="button" aria-label="Lecture">▶</button>
-            <input id="dock-time" type="range" min="0" max="0" value="0" aria-label="Heure" />
-            <span id="dock-time-label">max</span>
-            <button id="dock-max" class="chip-btn" type="button">Max</button>
+            <span id="dock-time-label" class="dock-time"></span>
+            <span class="dock-spacer"></span>
             <button id="dock-min" class="icon-ghost" type="button" title="Réduire / agrandir">▾</button>
             <button id="dock-close" class="icon-ghost" type="button" title="Fermer la coupe">✕</button>
           </div>

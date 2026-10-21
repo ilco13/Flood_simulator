@@ -501,9 +501,10 @@ button.icon {
 #map-status {
   position: absolute;
   top: 10px;
-  left: 10px;
-  z-index: 3;
-  max-width: calc(100% - 80px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  max-width: calc(100% - 120px);
   padding: 8px 12px;
   border-radius: 999px;
   background: rgba(17, 28, 40, 0.88);
@@ -872,4 +873,117 @@ button.icon.sm {
 }
 .section-handle:active {
   cursor: grabbing;
+}
+
+/* Fenêtre flottante des résultats (en haut à gauche de la carte) */
+#results-dock {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  width: 370px;
+  max-width: calc(100% - 70px);
+  z-index: 5;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100% - 20px);
+}
+#results-dock.with-section {
+  max-height: calc(100% - 400px);
+  min-height: 120px;
+}
+#results-dock #time-label {
+  min-width: 58px;
+  text-align: right;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.rdock-body {
+  overflow-y: auto;
+  margin-top: 6px;
+  padding-right: 2px;
+  overscroll-behavior: contain;
+}
+.rdock-body h3 {
+  margin: 10px 0 2px;
+}
+#results-dock.min .rdock-body {
+  display: none;
+}
+.legend-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+.legend-row .legend {
+  flex: 1;
+  margin: 0;
+}
+label.check.small {
+  font-size: 12.5px;
+  margin: 0;
+}
+.summary-box summary {
+  cursor: pointer;
+  font-size: 13px;
+  margin-top: 10px;
+  color: var(--muted);
+}
+.dock-spacer {
+  flex: 1;
+}
+.dock-time {
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+details.advanced > summary,
+section.about summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+details.advanced h3 {
+  margin-top: 14px;
+}
+@media (max-width: 760px) {
+  #results-dock {
+    top: 8px;
+    left: 8px;
+    right: 8px;
+    width: auto;
+    max-width: none;
+    max-height: 38%;
+    padding: 6px 8px;
+  }
+  #results-dock.with-section {
+    max-height: 38%;
+  }
+  /* Le panneau (feuille du bas) passe au-dessus des fenêtres flottantes */
+  #panel {
+    z-index: 8;
+  }
+  /* Coupe sous la fenêtre de résultats réduite (barre de temps seule) */
+  #results-dock:not([hidden]) ~ #section-dock {
+    top: 60px;
+  }
+  #results-dock:not([hidden]) {
+    z-index: 6;
+  }
+  #map-status {
+    top: auto;
+    bottom: 90px;
+  }
+}
+#results-dock.min {
+  min-height: 0;
 }
