@@ -109,11 +109,49 @@ function chooseEngine(p, cells) {
 }
 
 /** Ordre de grandeur du temps de calcul (débits de mailles×pas par seconde mesurés). */
+/*
+ * Estimation du temps de calcul. Modèle : travail = mailles × durée simulée / pas de temps de
+ * référence (eau de 3 m) ; vitesse = « travail » traité par seconde, mesurée sur cet appareil
+ * à la fin de chaque simulation (moyenne glissante), avec une valeur de départ prudente.
+ * La même formule sert avant le calcul et pendant (temps restant), d'où des chiffres cohérents.
+ */
+const SPEED_KEY = 'flood-sim-speed';
+const DEFAULT_SPEED = { gpu: 2e9, cpu: 2.5e7 };
+
+function speedOf(engine) {
+  try {
+    const v = JSON.parse(localStorage.getItem(SPEED_KEY) || '{}')[engine];
+    if (v > 0) return v;
+  } catch {
+    /* stockage indisponible */
+  }
+  return DEFAULT_SPEED[engine];
+}
+
+function learnSpeed(engine, measured) {
+  try {
+    const all = JSON.parse(localStorage.getItem(SPEED_KEY) || '{}');
+    const old = all[engine];
+    all[engine] = old > 0 ? Math.exp(0.5 * Math.log(old) + 0.5 * Math.log(measured)) : measured;
+    localStorage.setItem(SPEED_KEY, JSON.stringify(all));
+  } catch {
+    /* rien */
+  }
+}
+
+const workOf = (cells, res, simSeconds) => (cells * simSeconds) / stableDt(res, 3);
+
+/** Durée simulée attendue (s) : arrêt après le pic estimé d'après le temps de concentration. */
+function expectedSimSeconds(p) {
+  const full = (p.rainH + p.tailH) * 3600;
+  if (!p.stopAfterPeak) return full;
+  const area = studyCands().reduce((a, c) => a + c.areaKm2, 0) || 1;
+  const tcH = Math.max(0.5, 0.6 * area ** 0.4); // temps de concentration approché (h)
+  return Math.min(full, (p.rainH + tcH + 1) * 3600);
+}
+
 function estimateSeconds(p, cells, engine) {
-  const T = (p.rainH + p.tailH) * 3600;
-  const steps = T / stableDt(p.res, 3);
-  const rate = engine === 'gpu' ? 6e8 : 2.5e7;
-  return (cells * steps) / rate;
+  return workOf(cells, p.res, expectedSimSeconds(p)) / speedOf(engine);
 }
 
 const fmtDur = (s) =>
@@ -718,12 +756,22 @@ async function startRun() {
       },
       onProgress: (frac, info) => {
         const el = (performance.now() - run.t0) / 1000;
-        const eta = frac > 0.02 ? (el / frac) * (1 - frac) : null;
+        // Temps restant : même modèle qu'avant le calcul, recalé sur la vitesse observée
+        // depuis le début (pondérée par l'avancement).
+        const cells = grid.nx * grid.ny;
+        let tEndExp = expectedSimSeconds(p);
+        if (info.t > tEndExp - 300) tEndExp = Math.min(totalTime, info.t + 3600);
+        const remainWork = workOf(cells, p.res, Math.max(0, tEndExp - info.t));
+        const doneWork = workOf(cells, p.res, info.t);
+        const vModel = speedOf(engine);
+        const vSeen = el > 3 ? doneWork / el : vModel;
+        const w = Math.min(1, info.t / Math.max(1, tEndExp));
+        const eta = remainWork / Math.exp((1 - w) * Math.log(vModel) + w * Math.log(vSeen));
         prog.set(
           'sim',
           frac,
           `${fmtH(info.t)} / ${fmtH(totalTime)} simulées` +
-            (eta != null ? ` · reste ≈ ${eta < 90 ? `${Math.round(eta)} s` : `${Math.round(eta / 60)} min`}` : '') +
+            ` · reste ≈ ${fmtDur(eta)}${p.stopAfterPeak ? ' (arrêt après le pic estimé)' : ''}` +
             ` · ${engine === 'gpu' ? 'GPU' : 'CPU'}`,
         );
       },
@@ -849,6 +897,8 @@ function finishRun(run, mass) {
   }
   if (state.data.warnings?.length) txt += `<br><span class="warn">Données : ${state.data.warnings.join(' ; ')}.</span>`;
   $('summary').innerHTML = txt;
+  // Vitesse observée sur cet appareil (pour les prochaines estimations), si le calcul a duré.
+  if (el > 5 && run.engine && run.tEnd > 0) learnSpeed(run.engine, workOf(grid.nx * grid.ny, grid.dx, run.tEnd) / el);
   const auto = run.autoStopped && run.tEnd != null;
   const stopped = !auto && run.stop && (run.tEnd ?? run.totalTime) < run.totalTime - 1;
   if (auto) run.totalTime = run.tEnd; // la suite de la décrue n'a pas été calculée
@@ -1176,6 +1226,144 @@ function candidateVerdict(c) {
   return { level: 'muted', text: 'lieu nettement au-dessus du lit : débordement peu probable' };
 }
 
+/* ---------- Pluies de référence (stations Météo-France proches) ---------- */
+
+/** Département(s) du lieu : le sien d'abord, puis ceux à moins de ~20 km. */
+async function departmentsAround(lon, lat) {
+  const deps = [];
+  const pts = [[0, 0], [0.25, 0], [-0.25, 0], [0, 0.18], [0, -0.18]];
+  for (const [dx, dy] of pts) {
+    try {
+      const res = await fetchWithTimeout(
+        `https://data.geopf.fr/geocodage/reverse?lon=${lon + dx}&lat=${lat + dy}&index=address&limit=1`,
+        8000,
+      );
+      const code = (await res.json()).features?.[0]?.properties?.citycode;
+      if (!code) continue;
+      let dep = code.startsWith('97') ? code.slice(0, 3) : code.slice(0, 2);
+      if (dep === '2A' || dep === '2B') dep = '20';
+      if (!deps.includes(dep)) deps.push(dep);
+    } catch {
+      /* point en mer ou service indisponible */
+    }
+  }
+  return deps.slice(0, 3);
+}
+
+async function fetchRainRef() {
+  const s = state.study;
+  if (!s) return;
+  const el = $('rain-ref');
+  state.rainWorker?.terminate();
+  el.innerHTML = '<p class="hint">Recherche des pluies observées près du lieu (stations Météo-France)…</p>';
+  const [lon, lat] = s.houseWgs;
+  const deps = await departmentsAround(lon, lat);
+  if (state.study !== s) return;
+  if (!deps.length) {
+    el.innerHTML = '<p class="hint">Pluies observées indisponibles ici (hors France ?).</p>';
+    return;
+  }
+  const w = new Worker(new URL('./data/rainWorker.js', import.meta.url), { type: 'module' });
+  state.rainWorker = w;
+  w.onmessage = (e) => {
+    const m = e.data;
+    if (state.study !== s) return w.terminate();
+    if (m.type === 'progress')
+      el.innerHTML =
+        `<p class="hint">Lecture des pluies journalières Météo-France depuis 1950 (département ${m.k}/${m.n}) : ` +
+        `${fmtNum(m.mb, 1)}${m.totalMb ? ` / ${fmtNum(m.totalMb, 0)}` : ''} Mo…</p>`;
+    else if (m.type === 'done') {
+      w.terminate();
+      s.rainRef = m;
+      renderRainRef();
+    } else if (m.type === 'error') {
+      w.terminate();
+      el.innerHTML = `<p class="hint">Pluies observées indisponibles : ${m.message}.</p>`;
+    }
+  };
+  w.onerror = () => {
+    w.terminate();
+    el.innerHTML = '<p class="hint">Pluies observées indisponibles.</p>';
+  };
+  w.postMessage({ lon, lat, deps });
+}
+
+// Pluie journalière (6 h–6 h) → pluie maximale sur 24 h glissantes (coefficient usuel).
+const DAY_TO_24H = 1.13;
+// Part de la pluie de 24 h tombant en 3 h lors d'un épisode intense (ordre de grandeur).
+const RATIO_3H = 0.75;
+
+function renderRainRef() {
+  const el = $('rain-ref');
+  const ref = state.study?.rainRef;
+  if (!ref) {
+    el.innerHTML = '';
+    return;
+  }
+  const st = ref.stations;
+  const near = st.filter((x) => x.d <= 15);
+  const pool = (near.filter((x) => x.q100 != null).length >= 2 ? near : st).filter((x) => x.q100 != null);
+  if (!st.length) {
+    el.innerHTML = '<p class="hint">Aucune station Météo-France à moins de 25 km.</p>';
+    return;
+  }
+  const wsum = pool.reduce((a, x) => a + 1 / (x.d + 3), 0);
+  const avg = (k) => pool.reduce((a, x) => a + x[k] / (x.d + 3), 0) / wsum;
+  const fmtDay = (d) => `${d.slice(6, 8)}/${d.slice(4, 6)}/${d.slice(0, 4)}`;
+  const scen = [];
+  if (pool.length) {
+    const q10 = avg('q10') * DAY_TO_24H;
+    const q100 = avg('q100') * DAY_TO_24H;
+    scen.push({ label: 'Décennale', mm: q10, h: 24, note: 'pluie qui revient en moyenne tous les 10 ans' });
+    scen.push({ label: 'Centennale', mm: q100, h: 24, note: 'pluie qui revient en moyenne tous les 100 ans' });
+    scen.push({ label: 'Orage centennal', mm: q100 * RATIO_3H, h: 3, note: 'estimé : 75 % de la pluie centennale de 24 h tombée en 3 h (orages méditerranéens)' });
+  }
+  const recSet = near.length ? near : st;
+  const rec = recSet.reduce((a, x) => (x.record.mm > a.record.mm ? x : a), recSet[0]);
+  if (rec?.record.day)
+    scen.push({
+      label: 'Record observé',
+      mm: rec.record.mm,
+      h: 24,
+      note: `${fmtNum(rec.record.mm)} mm le ${fmtDay(rec.record.day)} à ${rec.name} (${fmtNum(rec.d)} km)`,
+    });
+  // Plus forts épisodes (une date = un épisode, maximum des stations proches)
+  const ev = new Map();
+  for (const x of recSet)
+    for (const [day, mm] of x.top) if (!ev.has(day) || ev.get(day).mm < mm) ev.set(day, { day, mm, name: x.name, d: x.d });
+  const events = [...ev.values()].sort((a, b) => b.mm - a.mm).slice(0, 8);
+  const btn = (sc, i) =>
+    `<button type="button" class="ref-chip" data-i="${i}" title="${sc.note}"><strong>${sc.label}</strong>` +
+    `<span>${fmtNum(sc.mm)} mm en ${sc.h} h</span></button>`;
+  el.innerHTML =
+    `<span class="lbl">Pluies de référence près du lieu</span>` +
+    `<div class="ref-chips">${scen.map(btn).join('')}</div>` +
+    `<details class="ref-events"><summary>Plus fortes pluies observées (${pool.length || st.length} stations Météo-France, depuis 1950)</summary><ul>` +
+    events
+      .map(
+        (x, i) =>
+          `<li><button type="button" class="link" data-e="${i}">${fmtDay(x.day)} : <strong>${fmtNum(x.mm)} mm</strong> en un jour à ${x.name} (${fmtNum(x.d)} km)</button></li>`,
+      )
+      .join('') +
+    `</ul></details>`;
+  const apply = (mm, h) => {
+    $('rain-mm').value = Math.round(mm);
+    $('rain-h').value = h;
+    $('rain-mm').dispatchEvent(new Event('input'));
+    $('rain-h').dispatchEvent(new Event('input'));
+  };
+  el.querySelectorAll('.ref-chip').forEach((b) => {
+    b.onclick = () => {
+      const sc = scen[Number(b.dataset.i)];
+      apply(sc.mm, sc.h);
+      el.querySelectorAll('.ref-chip').forEach((x) => x.classList.toggle('on', x === b));
+    };
+  });
+  el.querySelectorAll('[data-e]').forEach((b) => {
+    b.onclick = () => apply(events[Number(b.dataset.e)].mm, 24);
+  });
+}
+
 /* ---------- Type de sol automatique (texture SoilGrids, ISRIC) ---------- */
 
 const SOIL_LABEL = { 1: 'perméable', 2: 'moyen', 3: 'peu perméable' };
@@ -1331,6 +1519,7 @@ function restoreCatchment() {
     showStudy();
     renderStudy();
     if (!state.study.soil?.group) fetchSoil();
+    fetchRainRef(); // résultat en cache après la première fois
   }
   renderSoilInfo();
 }
@@ -1398,6 +1587,7 @@ function studyPlace(lng, lat) {
       renderStudy();
       describeRes();
       fetchSoil();
+      fetchRainRef();
       if (window.matchMedia('(max-width: 760px)').matches) $('panel').classList.remove('collapsed');
     } else if (m.type === 'error') {
       end();
@@ -1503,6 +1693,8 @@ function clearStudy() {
   $('catch-clear').disabled = true;
   $('catch-list').innerHTML = '';
   $('catch-info').textContent = '';
+  state.rainWorker?.terminate();
+  $('rain-ref').innerHTML = '';
   describeRes();
   renderSoilInfo();
 }
@@ -2072,6 +2264,18 @@ async function main() {
   }
   updateResInfo();
   restoreCatchment();
+  // Pendant qu'on déplace / zoome la carte, le calcul GPU cède la main entre de petits lots.
+  let idleTimer = null;
+  state.map.on('movestart', () => {
+    clearTimeout(idleTimer);
+    if (state.run?.solver) state.run.solver.interactive = true;
+  });
+  state.map.on('moveend', () => {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      if (state.run?.solver) state.run.solver.interactive = false;
+    }, 400);
+  });
   state.map.on('click', (e) => {
     if (state.catchMode) studyPlace(e.lngLat.lng, e.lngLat.lat);
     else if (state.sectionMode) placeSection(e.lngLat);

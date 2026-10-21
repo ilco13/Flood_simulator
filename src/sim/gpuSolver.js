@@ -237,6 +237,10 @@ export function gpuMaxCells(device) {
 export class GpuSolver {
   constructor(device, { nx, ny, dx, z, S, manning }, gauges) {
     this.device = device;
+    // Taille des lots de pas envoyés au GPU, ajustée pour qu'un lot dure ~40 ms (≈ 12 ms quand
+    // l'utilisateur déplace la carte) : la carte garde la main pour s'afficher.
+    this.batchK = 16;
+    this.interactive = false;
     this.nx = nx;
     this.ny = ny;
     this.dx = dx;
@@ -384,7 +388,9 @@ export class GpuSolver {
       const dt0 = stableDt(this.dx, this.hmaxGlobal * 1.15 + 0.05);
       let t = this.t;
       let K = 0;
-      while (K < MAX_BATCH && t < tEnd - 1e-6) {
+      const kMax = Math.max(1, Math.min(MAX_BATCH, Math.round(this.batchK)));
+      const tb = performance.now();
+      while (K < kMax && t < tEnd - 1e-6) {
         const dt = Math.min(dt0, tEnd - t);
         const P0 = hyeto.cumulative(t);
         const P1 = hyeto.cumulative(t + dt);
@@ -427,6 +433,12 @@ export class GpuSolver {
       if (!Number.isFinite(this.hmaxGlobal)) throw new Error('Instabilité numérique détectée');
       this.t = t;
       this.steps = (this.steps || 0) + K;
+      // Ajuste la taille du lot suivant d'après la durée de celui-ci.
+      const ms = performance.now() - tb;
+      const target = this.interactive ? 12 : 40;
+      if (K === kMax && ms > 0) this.batchK = Math.max(1, Math.min(MAX_BATCH, kMax * Math.min(2, Math.max(0.25, target / ms))));
+      // Pendant un déplacement de la carte, on laisse passer une image entre deux lots.
+      if (this.interactive && typeof requestAnimationFrame !== 'undefined') await new Promise((r) => requestAnimationFrame(() => r()));
     }
   }
 
