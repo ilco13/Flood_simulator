@@ -23,6 +23,68 @@ const SEARCH_RADIUS = 600; // m : cours d'eau pris en compte autour du lieu
 
 const post = (type, data) => self.postMessage({ type, ...data });
 
+const RETRY_WAIT = [5000, 15000, 30000]; // ms : les pannes du service IGN durent parfois ~1 min
+
+async function withRetry(fn) {
+  for (let a = 0; ; a++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (a >= RETRY_WAIT.length) throw new Error(`serveur IGN indisponible pour le moment (${e.message || e}) : réessayez dans quelques minutes`);
+      await new Promise((r) => setTimeout(r, RETRY_WAIT[a]));
+    }
+  }
+}
+
+/**
+ * Maille la plus drainée près du tracé BD TOPO (à 2 mailles près), parmi les points du tracé
+ * situés à moins de `near` m de son point le plus proche du lieu : on reste sur ce cours d'eau
+ * sans glisser vers une confluence voisine.
+ */
+function snapAlongTrace(grid, acc, trace, x0, y0, near) {
+  let best = -1;
+  for (const [x, y] of trace) {
+    if (Math.hypot(x - x0, y - y0) > near) continue;
+    const c = cellOf(grid, x, y);
+    if (!c) continue;
+    for (let dj = -2; dj <= 2; dj++)
+      for (let di = -2; di <= 2; di++) {
+        const i = c.i + di;
+        const j = c.j + dj;
+        if (i < 0 || j < 0 || i >= grid.nx || j >= grid.ny) continue;
+        const k = j * grid.nx + i;
+        if (best < 0 || acc[k] > acc[best]) best = k;
+      }
+  }
+  return best;
+}
+
+/** Maille la plus proche du tracé (près du lieu) dont la surface drainée atteint `minCells`. */
+function snapNearWithArea(grid, acc, trace, x0, y0, minCells, radius) {
+  let best = -1;
+  let bestD = Infinity;
+  const r = Math.ceil(radius / grid.dx);
+  for (const [x, y] of trace) {
+    if (Math.hypot(x - x0, y - y0) > radius) continue;
+    const c = cellOf(grid, x, y);
+    if (!c) continue;
+    for (let dj = -r; dj <= r; dj++)
+      for (let di = -r; di <= r; di++) {
+        const i = c.i + di;
+        const j = c.j + dj;
+        if (i < 0 || j < 0 || i >= grid.nx || j >= grid.ny) continue;
+        const k = j * grid.nx + i;
+        if (acc[k] < minCells) continue;
+        const d = Math.hypot(di, dj);
+        if (d < bestD) {
+          bestD = d;
+          best = k;
+        }
+      }
+  }
+  return best;
+}
+
 function touchesEdge(mask, nx, ny) {
   for (let i = 0; i < nx; i++) if (mask[i] || mask[(ny - 1) * nx + i]) return true;
   for (let j = 0; j < ny; j++) if (mask[j * nx] || mask[j * nx + nx - 1]) return true;
@@ -76,13 +138,10 @@ self.onmessage = async (e) => {
       const snap = (v) => Math.round(v / dx) * dx;
       const grid = makeGrid({ xmin: snap(x - half), ymin: snap(y - half), xmax: snap(x + half), ymax: snap(y + half) }, dx);
       const warnings = [];
-      const demP = fetchFloatGrid(grid, LAYERS.dem, LAYERS.demFallback, { warnings });
-      const rivP =
-        half <= RIVERS_MAX_HALF
-          ? fetchRivers({ xmin: grid.xmin - 200, ymin: grid.ymin - 200, xmax: grid.xmax + 200, ymax: grid.ymax + 200 }).catch(
-              () => null,
-            )
-          : Promise.resolve(null);
+      // Le service IGN renvoie parfois des erreurs passagères (502…) : on réessaie l'étape entière.
+      const demP = withRetry(() => fetchFloatGrid(grid, LAYERS.dem, LAYERS.demFallback, { warnings }));
+      const rbox = { xmin: grid.xmin - 200, ymin: grid.ymin - 200, xmax: grid.xmax + 200, ymax: grid.ymax + 200 };
+      const rivP = half <= RIVERS_MAX_HALF ? withRetry(() => fetchRivers(rbox)).catch(() => null) : Promise.resolve(null);
       const [dem, rivers] = await Promise.all([demP, rivP]);
       if (!(dem[cellOf(grid, x, y).k] > -1000)) throw new Error('pas de relief disponible ici (hors France ?)');
       const fm = flowModel({ grid, dem, rivers, burnDepth });
@@ -97,6 +156,9 @@ self.onmessage = async (e) => {
           dist: r.d,
           px: r.x,
           py: r.y,
+          x0: r.x,
+          y0: r.y,
+          trace: r.trace,
         }));
         // Ruissellement du versant qui domine directement le lieu.
         cands.push({ kind: 'slope', name: 'Ruissellement du versant au-dessus du lieu', named: false, dist: 0, px: x, py: y });
@@ -110,7 +172,21 @@ self.onmessage = async (e) => {
             : l === 0
               ? { x: c.px, y: c.py, radiusM: 30 }
               : { x: c.px, y: c.py, minAreaM2: c.areaM2, radiusM: Math.max(2 * dx, 1.5 * LEVELS[l - 1].dx) };
-        const k = snapToStream(grid, fm.acc, pt);
+        // Calage d'un cours d'eau : la maille la plus drainée le long de son tracé (±120 m, à 1-2
+        // mailles près) — le tracé BD TOPO peut être décalé du fond du lit (gorges…).
+        // À chaque palier : on suit le tracé, pour rester sur le même cours d'eau (au premier
+        // palier, sa surface est tronquée s'il entre par le bord : elle ne peut pas servir de repère).
+        let k =
+          c.kind === 'stream' && c.trace?.length
+            ? snapAlongTrace(grid, fm.acc, c.trace, c.x0, c.y0, Math.max(40, 2 * dx))
+            : snapToStream(grid, fm.acc, pt);
+        // Garde-fou : d'un palier à l'autre, le bassin ne peut que grandir. Si le calage le long
+        // du tracé s'effondre (lit trop étroit pour la maille), on prend la maille la plus proche
+        // du tracé dont la surface atteint celle du palier précédent.
+        if (l > 0 && c.kind === 'stream' && k >= 0 && fm.acc[k] * dx * dx < 0.9 * c.areaM2) {
+          const k2 = snapNearWithArea(grid, fm.acc, c.trace?.length ? c.trace : [[c.px, c.py]], c.x0 ?? c.px, c.y0 ?? c.py, (0.9 * c.areaM2) / (dx * dx), Math.max(150, 3 * dx));
+          k = k2 >= 0 ? k2 : snapToStream(grid, fm.acc, pt);
+        }
         if (k < 0) {
           c.failed = true;
           continue;
@@ -134,6 +210,17 @@ self.onmessage = async (e) => {
     for (const c of cands) {
       if (c.failed) continue;
       if (c.kind === 'stream' && c.areaM2 < 1e4) continue; // moins d'1 ha : pas un vrai cours d'eau ici
+      // Même lit qu'un candidat plus proche (affluent calé sur la rivière à la confluence) : doublon.
+      if (
+        c.kind === 'stream' &&
+        out.some(
+          (o) =>
+            o.kind === 'stream' &&
+            Math.abs(o.areaKm2 * 1e6 - c.areaM2) / Math.max(c.areaM2, 1) < 0.03 &&
+            Math.hypot(o.point.x - c.px, o.point.y - c.py) < 500,
+        )
+      )
+        continue;
       const key = `${Math.round(c.px)},${Math.round(c.py)}`;
       if (seen.has(key)) continue;
       seen.add(key);

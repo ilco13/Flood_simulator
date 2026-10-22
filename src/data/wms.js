@@ -19,8 +19,10 @@ export function getMapUrl(layer, bbox, width, height, format) {
 }
 
 const REQUEST_TIMEOUT = 30000; // ms : au-delà, on relance la requête
+// Attentes entre essais : les pannes passagères du service IGN durent parfois ~1 min.
+const RETRY_WAIT = [1000, 3000, 8000, 15000, 30000];
 
-export async function fetchWithRetry(url, { tries = 5, signal, onRetry, timeout = REQUEST_TIMEOUT } = {}) {
+export async function fetchWithRetry(url, { tries = 6, signal, onRetry, timeout = REQUEST_TIMEOUT } = {}) {
   let lastErr;
   for (let a = 0; a < tries; a++) {
     // Délai maximum par requête, combiné avec l'annulation demandée par l'appelant.
@@ -43,7 +45,7 @@ export async function fetchWithRetry(url, { tries = 5, signal, onRetry, timeout 
       lastErr = e;
       if (a < tries - 1) onRetry?.(a + 2, tries, e);
       if (a === tries - 1) break;
-      await new Promise((r) => setTimeout(r, Math.min(8000, 700 * 2 ** a)));
+      await new Promise((r) => setTimeout(r, RETRY_WAIT[Math.min(a, RETRY_WAIT.length - 1)]));
     } finally {
       clearTimeout(timer);
       signal?.removeEventListener('abort', onAbort);
@@ -52,7 +54,7 @@ export async function fetchWithRetry(url, { tries = 5, signal, onRetry, timeout 
   throw lastErr;
 }
 
-async function cachedBuffer(url, signal, onRetry, tries = 5) {
+async function cachedBuffer(url, signal, onRetry, tries = 6) {
   const hit = await cacheGet(url);
   if (hit) return hit;
   const buf = await fetchWithRetry(url, { signal, onRetry, tries });

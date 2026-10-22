@@ -1496,6 +1496,16 @@ const DAY_TO_24H = 1.13;
 // Part de la pluie de 24 h tombant en 3 h lors d'un épisode intense (ordre de grandeur).
 const RATIO_3H = 0.75;
 
+/**
+ * Coefficient d'abattement spatial : la pluie de référence est mesurée en un point ; la pluie
+ * moyenne sur un bassin de A km² pendant D heures est plus faible (Leclerc et Schaake, 1972,
+ * d'après les courbes de l'US Weather Bureau) : 1 − e^(−1,1·D^¼) + e^(−1,1·D^¼ − 0,01·A[mi²]).
+ */
+function arealReduction(areaKm2, hours) {
+  const k = Math.exp(-1.1 * hours ** 0.25);
+  return Math.min(1, 1 - k + k * Math.exp(-0.01 * (areaKm2 / 2.59)));
+}
+
 function renderRainRef() {
   const el = $('rain-ref');
   const ref = state.study?.rainRef;
@@ -1535,11 +1545,19 @@ function renderRainRef() {
   for (const x of recSet)
     for (const [day, mm] of x.top) if (!ev.has(day) || ev.get(day).mm < mm) ev.set(day, { day, mm, name: x.name, d: x.d });
   const events = [...ev.values()].sort((a, b) => b.mm - a.mm).slice(0, 8);
+  // Pluie moyenne sur les bassins retenus (abattement), arrondie au mm
+  const areaKm2 = studyCands().reduce((a, c) => a + c.areaKm2, 0);
+  for (const sc of scen) {
+    sc.arf = arealReduction(areaKm2, sc.h);
+    sc.point = sc.mm;
+    sc.mm = sc.mm * sc.arf;
+    if (sc.arf < 0.995) sc.note += ` ; ${fmtNum(sc.point)} mm au point, ${fmtNum(sc.mm)} mm en moyenne sur ${fmtArea(areaKm2)} (abattement ×${fmtNum(sc.arf, 2)})`;
+  }
   const btn = (sc, i) =>
     `<button type="button" class="ref-chip" data-i="${i}" title="${sc.note}"><strong>${sc.label}</strong>` +
     `<span>${fmtNum(sc.mm)} mm en ${sc.h} h</span></button>`;
   el.innerHTML =
-    `<span class="lbl">Pluies de référence près du lieu</span>` +
+    `<span class="lbl">Pluies de référence près du lieu${scen.some((x) => x.arf < 0.995) ? ' (moyennes sur le bassin)' : ''}</span>` +
     `<div class="ref-chips">${scen.map(btn).join('')}</div>` +
     `<details class="ref-events"><summary>Plus fortes pluies observées (${pool.length || st.length} stations Météo-France, depuis 1950)</summary><ul>` +
     events
@@ -1563,7 +1581,7 @@ function renderRainRef() {
     };
   });
   el.querySelectorAll('[data-e]').forEach((b) => {
-    b.onclick = () => apply(events[Number(b.dataset.e)].mm, 24);
+    b.onclick = () => apply(events[Number(b.dataset.e)].mm * arealReduction(areaKm2, 24), 24);
   });
 }
 
@@ -1794,7 +1812,8 @@ function studyPlace(lng, lat) {
       if (window.matchMedia('(max-width: 760px)').matches) $('panel').classList.remove('collapsed');
     } else if (m.type === 'error') {
       end();
-      info.innerHTML = `<span class="warn">Analyse impossible : ${m.message}</span>`;
+      info.innerHTML = `<span class="warn">Analyse impossible : ${m.message}</span> <button type="button" class="ghost" id="catch-retry">Réessayer</button>`;
+      $('catch-retry').onclick = () => studyPlace(lng, lat);
     }
   };
   w.onerror = async (e) => {
@@ -1857,6 +1876,7 @@ function renderStudy() {
       autoResForStudy();
       renderStudy();
       describeRes();
+      renderRainRef();
     };
     list.appendChild(li);
   });

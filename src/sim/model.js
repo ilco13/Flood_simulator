@@ -127,7 +127,8 @@ export function applyObstacles(grid, z, obstacles) {
 /** Relief conditionné et réseau d'écoulement D8 (pour délimiter des bassins versants). */
 export function flowModel({ grid, dem, rivers, burnDepth }) {
   const z = dem.slice();
-  if (rivers && burnDepth > 0) burnRivers(grid, z, rivers, burnDepth);
+  // Délimitation des bassins : on traverse aussi les barrages (un lac se déverse vers l'aval).
+  if (rivers && burnDepth > 0) burnRivers(grid, z, rivers, burnDepth, Infinity);
   const { parent, order, filled } = drainageLabels(z, grid.nx, grid.ny, {
     maxDepth: Math.max(2, 0.3 * grid.dx),
     maxLength: Math.max(4, Math.round(300 / grid.dx)),

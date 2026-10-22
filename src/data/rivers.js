@@ -110,7 +110,28 @@ export function riverCandidates(rivers, x, y, maxDist, max = 5) {
       }
     }
   }
-  return [...best.values()].sort((a, b) => a.d - b.d).slice(0, max);
+  const out = [...best.values()].sort((a, b) => a.d - b.d).slice(0, max);
+  // Points du tracé de chaque cours d'eau à moins de 120 m du point retenu (tous les 5 m) :
+  // ils servent à caler le candidat sur le vrai lit, même si le tracé est un peu décalé.
+  for (const c of out) {
+    c.trace = [];
+    for (const f of rivers.features) {
+      const pr = f.properties;
+      if ((pr.name || '') !== (c.name || '') || pr.underground) continue;
+      for (const part of lineParts(f.geometry))
+        for (let s = 0; s < part.length - 1; s++) {
+          const [x0, y0] = part[s];
+          const [x1, y1] = part[s + 1];
+          const n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / 5));
+          for (let k = 0; k <= n; k++) {
+            const px = x0 + ((x1 - x0) * k) / n;
+            const py = y0 + ((y1 - y0) * k) / n;
+            if (Math.hypot(px - c.x, py - c.y) <= 120) c.trace.push([px, py]);
+          }
+        }
+    }
+  }
+  return out;
 }
 
 function lineParts(geom) {
@@ -172,17 +193,23 @@ export function rasterizeLine(grid, coords, visit) {
  * de son voisinage 3×3 moins `depth`. Cela rétablit la continuité des petits vallats que la
  * maille de calcul ne résout pas, et le passage sous les remblais (buses, ponts).
  */
-export function burnRivers(grid, z, rivers, depth) {
+export function burnRivers(grid, z, rivers, depth, maxCarve = MAX_CARVE) {
   const z0 = z.slice();
   const { nx, ny } = grid;
   let count = 0;
   const paths = [];
   for (const f of rivers.features) {
-    if (!isBurnable(f)) continue;
+    // Axes « fictifs » des rivières larges et des plans d'eau : pas de gravure locale (la surface
+    // en eau est déjà dans le relief) mais pente continue imposée, pour relier l'amont à l'aval
+    // à travers ponts, seuils et digues percées d'un ouvrage.
+    const pr = f.properties;
+    const axis = pr.fictif && !pr.underground && pr.nature === 'Ecoulement naturel' && !(pr.name && /canal/i.test(pr.name));
+    if (!isBurnable(f) && !axis) continue;
     for (const part of lineParts(f.geometry)) {
       const path = [];
       rasterizeLine(grid, part, (k, i, j) => {
         path.push(k);
+        if (axis) return;
         let m = z0[k];
         for (let dj = -1; dj <= 1; dj++) {
           const jj = j + dj;
@@ -209,7 +236,7 @@ export function burnRivers(grid, z, rivers, depth) {
       paths.push(path);
     }
   }
-  count += enforceDownstream(grid, z, paths);
+  count += enforceDownstream(grid, z, paths, maxCarve);
   return count;
 }
 
@@ -222,7 +249,7 @@ const MAX_CARVE = 15;
  * vers l'aval (les plus hauts d'abord) et une maille plus haute que la précédente est abaissée
  * à son niveau ; un tronçon démarre au niveau du tronçon amont déjà traité qui le touche.
  */
-function enforceDownstream(grid, z, paths) {
+function enforceDownstream(grid, z, paths, maxCarve) {
   const { nx, ny } = grid;
   const done = new Uint8Array(nx * ny);
   let count = 0;
@@ -242,7 +269,7 @@ function enforceDownstream(grid, z, paths) {
       }
     for (const k of path) {
       if (z[k] > level) {
-        if (z[k] - level <= MAX_CARVE) {
+        if (z[k] - level <= maxCarve) {
           z[k] = level;
           count++;
         } else level = z[k];
