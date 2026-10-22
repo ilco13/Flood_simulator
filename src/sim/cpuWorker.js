@@ -20,7 +20,11 @@ self.onmessage = async (e) => {
       ...msg.options,
       hyeto,
       onGauge: (t, Q) => self.postMessage({ type: 'gauge', t, Q }),
-      onSnapshot: (t, h) => self.postMessage({ type: 'snapshot', t, h }, [h.buffer]),
+      onSnapshot: (t, h, flux) =>
+        self.postMessage(
+          { type: 'snapshot', t, h, flux },
+          flux ? [h.buffer, flux.qm.buffer, flux.vec.fx.buffer, flux.vec.fy.buffer] : [h.buffer],
+        ),
       onProgress: async (p, info) => {
         self.postMessage({ type: 'progress', p, info });
         // Rend la main à la boucle d'événements pour recevoir un éventuel « stop ».

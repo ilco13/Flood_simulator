@@ -2,6 +2,7 @@
 
 import { CpuSolver } from './cpuSolver.js';
 import { stableDt } from './scheme.js';
+import { fluxFields } from './flux.js';
 
 /** Adaptateur asynchrone autour du solveur CPU. */
 export class CpuBackend {
@@ -30,6 +31,10 @@ export class CpuBackend {
   async readDepth() {
     return this.solver.h.slice();
   }
+  async readFlux() {
+    const s = this.solver;
+    return fluxFields(s.qx, s.qy, s.nx, s.ny);
+  }
   async readMaxima() {
     const s = this.solver;
     return { hmax: s.hmax, tmax: s.tmax, vmax: s.vmax };
@@ -57,7 +62,7 @@ export async function simulate(backend, opts) {
     t = tn;
     opts.onGauge?.(t, await backend.gaugeDischarges());
     if (t >= nextSnap - 1e-6 || t >= totalTime - 1e-6) {
-      await opts.onSnapshot?.(t, await backend.readDepth());
+      await opts.onSnapshot?.(t, await backend.readDepth(), backend.readFlux ? await backend.readFlux() : null);
       nextSnap += snapshotEvery;
     }
     await opts.onProgress?.(t / totalTime, {

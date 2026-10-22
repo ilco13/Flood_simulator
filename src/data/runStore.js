@@ -69,7 +69,11 @@ async function unpackDem(blob) {
  */
 export async function packRun({ name, params, grid, totalTime, tEnd, store, series, gauges, maxima, dem, zSim, outline, rivers, summary, warnings }) {
   const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-  const snaps = store.items.map((it) => ({ t: it.t, blob: toBlob(it.data) }));
+  const snaps = store.items.map((it) => ({
+    t: it.t,
+    blob: toBlob(it.data),
+    ...(it.fdata ? { fblob: toBlob(it.fdata), vblob: toBlob(it.vdata), vmeta: it.vmeta } : {}),
+  }));
   const payload = {
     snaps,
     hmax: await packFloat(maxima.hmax),
@@ -88,7 +92,7 @@ export async function packRun({ name, params, grid, totalTime, tEnd, store, seri
     },
   };
   let size = payload.hmax.size + payload.tmax.size + payload.vmax.size + payload.dem.size + (payload.zsim?.size || 0);
-  for (const s of snaps) size += s.blob.size;
+  for (const s of snaps) size += s.blob.size + (s.fblob?.size || 0) + (s.vblob?.size || 0);
   const meta = {
     id,
     name,
@@ -168,12 +172,15 @@ export async function exportRun(id) {
     ['dem', payload.dem],
     ...(payload.zsim ? [['zsim', payload.zsim]] : []),
   ];
-  const blobs = [...named.map((x) => x[1]), ...payload.snaps.map((s) => s.blob)];
+  // Débit (facultatif) : après les instantanés, deux blocs par instantané qui en a.
+  const flow = payload.snaps.filter((s) => s.fblob);
+  const blobs = [...named.map((x) => x[1]), ...payload.snaps.map((s) => s.blob), ...flow.flatMap((s) => [s.fblob, s.vblob])];
   const header = {
     meta,
     json: payload.json,
     parts: named.map((x) => x[0]),
     snapTimes: payload.snaps.map((s) => s.t),
+    snapFlow: payload.snaps.map((s) => (s.fblob ? s.vmeta : null)),
     sizes: blobs.map((b) => b.size),
   };
   const head = new TextEncoder().encode(JSON.stringify(header));
@@ -196,7 +203,16 @@ export async function importRun(file) {
   });
   const parts = header.parts || ['hmax', 'tmax', 'vmax', 'dem'];
   const named = Object.fromEntries(parts.map((name, i) => [name, blobs[i]]));
-  const snapBlobs = blobs.slice(parts.length);
+  const nSnap = header.snapTimes.length;
+  const snapBlobs = blobs.slice(parts.length, parts.length + nSnap);
+  let fi = parts.length + nSnap;
+  const flowOf = (i) => {
+    const vmeta = header.snapFlow?.[i];
+    if (!vmeta) return {};
+    const out = { fblob: blobs[fi], vblob: blobs[fi + 1], vmeta };
+    fi += 2;
+    return out;
+  };
   const meta = { ...header.meta, id: `${Date.now().toString(36)}-imp`, imported: true };
   const payload = {
     hmax: named.hmax,
@@ -204,7 +220,7 @@ export async function importRun(file) {
     vmax: named.vmax,
     dem: named.dem,
     zsim: named.zsim || null,
-    snaps: header.snapTimes.map((t, i) => ({ t, blob: snapBlobs[i] })),
+    snaps: header.snapTimes.map((t, i) => ({ t, blob: snapBlobs[i], ...flowOf(i) })),
     json: header.json,
   };
   return saveRun({ meta, payload });

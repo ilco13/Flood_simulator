@@ -8,7 +8,8 @@ import { meanRunoff, runoffMm } from './hydrology/scs.js';
 import { simulate } from './sim/driver.js';
 import { getGpuDevice, gpuMaxCells, GpuSolver } from './sim/gpuSolver.js';
 import { SnapshotStore, quantize, dequantize } from './sim/snapshots.js';
-import { WaterCanvas, buildLut, legendStops, PALETTES, SCALES, RUNOFF } from './render/water.js';
+import { WaterCanvas, buildLut, legendStops, PALETTES, SCALES, RUNOFF, buildFlowLut, flowLegendStops } from './render/water.js';
+import { dequantizeFlow } from './sim/flux.js';
 import { drawChart } from './ui/chart.js';
 import { cacheClear } from './data/cache.js';
 import { stableDt } from './sim/scheme.js';
@@ -42,6 +43,9 @@ const state = {
   lut: null,
   runoff: true,
   palette: 'bleus',
+  layerMode: 'depth', // ou 'flow' : couleur selon le débit
+  arrows: true,
+  flowLut: buildFlowLut(),
   scale: 'standard',
   hiddenGauges: new Set(),
   probe: null,
@@ -299,6 +303,21 @@ function setupUi() {
     $('res-min').textContent = min ? '▴' : '▾';
     if (!min) drawHydro();
   };
+  $('layer-mode').addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    state.layerMode = b.dataset.v;
+    $('layer-mode').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+    $('runoff-row').hidden = state.layerMode === 'flow';
+    if (state.layerMode === 'flow' && state.run && !state.run.store.hasFlow)
+      $('summary').insertAdjacentHTML('afterbegin', '<span class="warn">Débit non enregistré pour cette simulation (calculée avant cette version) : relancez-la.</span><br>');
+    renderMapLegend();
+    renderCurrent();
+  });
+  $('arrows').addEventListener('change', () => {
+    state.arrows = $('arrows').checked;
+    renderArrows();
+  });
   $('runoff').addEventListener('change', () => {
     state.runoff = $('runoff').checked;
     applyColors();
@@ -410,7 +429,8 @@ const fmtBreak = (d) => (d < 1 ? `${Math.round(d * 100)} cm` : `${String(d).repl
 /** Légende verticale sur le bord droit de la carte : dégradé et hauteurs associées. */
 function renderMapLegend() {
   const el = $('map-legend');
-  const stops = legendStops(state.palette, state.scale);
+  const flowMode = state.layerMode === 'flow';
+  const stops = flowMode ? flowLegendStops() : legendStops(state.palette, state.scale);
   const n = stops.length;
   const rgb = (c) => `rgb(${c.join(',')})`;
   // Du plus profond (en haut) au plus faible (en bas), intervalles de même hauteur.
@@ -420,12 +440,15 @@ function renderMapLegend() {
   const labels = stops
     .slice()
     .reverse()
-    .map((s, i) => `<span style="top:${(i / (n - 1)) * 100}%">${i === 0 ? '≥ ' : ''}${fmtBreak(s.d)}</span>`)
+    .map(
+      (s, i) =>
+        `<span style="top:${(i / (n - 1)) * 100}%">${i === 0 ? '≥ ' : ''}${flowMode ? fmtNum(s.d, s.d >= 1 ? 0 : Number.isInteger(Math.round(s.d * 1000) / 100) ? 1 : 2) : fmtBreak(s.d)}</span>`,
+    )
     .join('');
   el.innerHTML =
-    `<div class="ml-title">Hauteur d'eau</div>` +
+    `<div class="ml-title">${flowMode ? 'Débit<br><small>m³/s par m de large</small>' : "Hauteur d'eau"}</div>` +
     `<div class="ml-scale"><div class="ml-bar">${bar}</div><div class="ml-labels">${labels}</div></div>` +
-    (state.runoff
+    (state.runoff && !flowMode
       ? `<div class="ml-runoff"><i style="background:${rgb(RUNOFF.color)}"></i>Ruissellement<br>1 cm – ${fmtBreak(stops[0].d)}</div>`
       : '');
 }
@@ -747,13 +770,15 @@ async function startRun() {
           prog.status('Pic de crue passé : arrêt du calcul…');
         }
       },
-      onSnapshot: async (t, h) => {
-        const q = await run.store.add(t, h);
+      onSnapshot: async (t, h, flux) => {
+        const q = await run.store.add(t, h, flux);
         const idx = run.store.length - 1;
+        const flow = await run.store.getFlow(idx);
+        if (flow) accumulateFlowMax(run, flow);
         $('time').max = idx;
         if (run.follow) {
           $('time').value = idx;
-          if (state.viewMode === 't') drawQuantized(q, t);
+          if (state.viewMode === 't') drawQuantized(q, t, flow);
         }
       },
       onProgress: (frac, info) => {
@@ -835,7 +860,7 @@ function runCpu(run, model, p, totalTime, snapshotEvery, cb) {
     w.onmessage = async (e) => {
       const m = e.data;
       if (m.type === 'gauge') cb.onGauge(m.t, m.Q);
-      else if (m.type === 'snapshot') await cb.onSnapshot(m.t, m.h);
+      else if (m.type === 'snapshot') await cb.onSnapshot(m.t, m.h, m.flux);
       else if (m.type === 'progress') cb.onProgress(m.p, m.info);
       else if (m.type === 'done') {
         w.terminate();
@@ -920,11 +945,15 @@ function finishRun(run, mass) {
 
 /* ---------- Affichage ---------- */
 
-function drawQuantized(q, t) {
+function drawQuantized(q, t, flow = null) {
   const run = state.run;
   if (!run?.water) return;
-  run.water.draw(q, state.lut);
+  state.lastFlow = flow;
+  // Couleur : hauteur d'eau, ou débit (viridis) si demandé et disponible
+  if (state.layerMode === 'flow' && flow) run.water.draw(flow.qf, state.flowLut);
+  else run.water.draw(q, state.lut);
   refreshWater(state.map);
+  renderArrows();
   state.lastQ = q;
   state.cursorT = t;
   redrawSection();
@@ -942,13 +971,153 @@ async function renderCurrent() {
   const run = state.run;
   if (!run?.water) return;
   if (state.viewMode === 'max') {
-    if (run.maxQ) drawQuantized(run.maxQ, null);
+    if (run.maxQ) drawQuantized(run.maxQ, null, await flowMaxOf(run));
     return;
   }
   const idx = Number($('time').value);
   if (!run.store.length) return;
   const q = await run.store.get(idx);
-  drawQuantized(q, run.store.timeOf(idx));
+  drawQuantized(q, run.store.timeOf(idx), await run.store.getFlow(idx));
+}
+
+/* ---------- Débit : maximum, flèches ---------- */
+
+/** Maximum du débit au fil des instantanés (par maille, et flèche la plus forte par bloc). */
+function accumulateFlowMax(run, flow) {
+  if (!run.flowMax) {
+    run.flowMax = {
+      qf: new Uint8Array(flow.qf.length),
+      vec: { ...flow.vec, fx: new Float32Array(flow.vec.fx.length), fy: new Float32Array(flow.vec.fy.length) },
+    };
+  }
+  const m = run.flowMax;
+  for (let k = 0; k < flow.qf.length; k++) if (flow.qf[k] > m.qf[k]) m.qf[k] = flow.qf[k];
+  const { fx, fy } = flow.vec;
+  for (let b = 0; b < fx.length; b++)
+    if (fx[b] * fx[b] + fy[b] * fy[b] > m.vec.fx[b] * m.vec.fx[b] + m.vec.fy[b] * m.vec.fy[b]) {
+      m.vec.fx[b] = fx[b];
+      m.vec.fy[b] = fy[b];
+    }
+}
+
+/** Débit maximal (calculé à la demande pour une simulation rouverte). */
+async function flowMaxOf(run) {
+  if (run.flowMax || run.flowMaxDone) return run.flowMax || null;
+  run.flowMaxDone = true;
+  if (!run.store.hasFlow) return null;
+  for (let i = 0; i < run.store.length; i++) {
+    const f = await run.store.getFlow(i);
+    if (f) accumulateFlowMax(run, f);
+  }
+  return run.flowMax || null;
+}
+
+function addArrowLayer() {
+  const map = state.map;
+  // Flèche pointant vers le haut (nord), blanche cernée de sombre : lisible sur photo et couleurs.
+  const S = 48;
+  const cv = document.createElement('canvas');
+  cv.width = S;
+  cv.height = S;
+  const c = cv.getContext('2d');
+  c.beginPath();
+  c.moveTo(S / 2, 3);
+  c.lineTo(S / 2 + 13, 22);
+  c.lineTo(S / 2 + 5, 22);
+  c.lineTo(S / 2 + 5, S - 3);
+  c.lineTo(S / 2 - 5, S - 3);
+  c.lineTo(S / 2 - 5, 22);
+  c.lineTo(S / 2 - 13, 22);
+  c.closePath();
+  c.fillStyle = '#ffffff';
+  c.strokeStyle = 'rgba(10,25,45,0.9)';
+  c.lineWidth = 3;
+  c.lineJoin = 'round';
+  c.stroke();
+  c.fill();
+  map.addImage('flow-arrow', c.getImageData(0, 0, S, S), { pixelRatio: 2 });
+  map.addSource('flow-arrows', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  map.addLayer(
+    {
+      id: 'flow-arrows',
+      type: 'symbol',
+      source: 'flow-arrows',
+      layout: {
+        'icon-image': 'flow-arrow',
+        'icon-rotate': ['get', 'rot'],
+        'icon-rotation-alignment': 'map',
+        'icon-size': ['get', 's'],
+        'icon-allow-overlap': true,
+        'icon-ignore-placement': true,
+      },
+      paint: { 'icon-opacity': 0.92 },
+    },
+    map.getLayer('catchment-fill') ? 'catchment-fill' : undefined,
+  );
+  let timer = null;
+  map.on('moveend', () => {
+    clearTimeout(timer);
+    timer = setTimeout(renderArrows, 120);
+  });
+}
+
+/**
+ * Flèches du débit : regroupées selon le zoom (une flèche tous les ~34 px), orientées dans le
+ * sens du courant, longueur croissant avec le débit (racine carrée, relative au débit fort
+ * de l'instant).
+ */
+function renderArrows() {
+  const map = state.map;
+  const src = map?.getSource('flow-arrows');
+  if (!src) return;
+  const run = state.run;
+  const vec = state.lastFlow?.vec;
+  if (!state.arrows || !vec || !run?.grid) return src.setData({ type: 'FeatureCollection', features: [] });
+  const g = run.grid;
+  const lat = map.getCenter().lat;
+  const mpp = (156543.03 * Math.cos((lat * Math.PI) / 180)) / 2 ** map.getZoom();
+  const blockPx = (vec.B * g.dx) / mpp;
+  const s = Math.max(1, Math.ceil(34 / blockPx));
+  const b = map.getBounds();
+  const items = [];
+  for (let bj = 0; bj < vec.by; bj += s)
+    for (let bi = 0; bi < vec.bx; bi += s) {
+      let fx = 0;
+      let fy = 0;
+      let n = 0;
+      for (let dj = 0; dj < s && bj + dj < vec.by; dj++)
+        for (let di = 0; di < s && bi + di < vec.bx; di++) {
+          const k = (bj + dj) * vec.bx + bi + di;
+          fx += vec.fx[k];
+          fy += vec.fy[k];
+          n++;
+        }
+      fx /= n;
+      fy /= n;
+      const m = Math.hypot(fx, fy);
+      if (m < 0.02) continue;
+      const cx = g.xmin + (bi + Math.min(s, vec.bx - bi) / 2) * vec.B * g.dx;
+      const cy = g.ymax - (bj + Math.min(s, vec.by - bj) / 2) * vec.B * g.dx;
+      const [lon, la] = toWgs(cx, cy);
+      if (lon < b.getWest() || lon > b.getEast() || la < b.getSouth() || la > b.getNorth()) continue;
+      items.push({ lon, la, fx, fy, m });
+    }
+  const ms = items.map((x) => x.m).sort((a, b2) => a - b2);
+  const ref = Math.max(0.1, ms[Math.floor(ms.length * 0.95)] || 0.1);
+  // Convergence des méridiens (Lambert 93) : le nord de la grille diffère du nord vrai de ~2°.
+  const gamma = (lonv) => (lonv - 3) * Math.sin((46.5 * Math.PI) / 180);
+  src.setData({
+    type: 'FeatureCollection',
+    features: items.map(({ lon, la, fx, fy, m }) => ({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [lon, la] },
+      properties: {
+        // fx vers l'est, fy vers le sud
+        rot: (Math.atan2(fx, -fy) * 180) / Math.PI + gamma(lon),
+        s: Math.min(1.5, Math.max(0.35, 0.35 + 1.0 * Math.sqrt(m / ref))),
+      },
+    })),
+  });
 }
 
 let hydroTimer = null;
@@ -1095,6 +1264,8 @@ function setupMapTip() {
     let html = h >= 0.01 ? `<b>${fmtD(h)}</b> d'eau ${when}` : `Pas d'eau ${when}`;
     if (run.maxima && state.viewMode !== 'max' && hm >= 0.01) html += `<br>max ${fmtD(hm)} à ${fmtH(run.maxima.tmax[c.k])}`;
     else if (run.maxima && state.viewMode === 'max' && hm >= 0.01) html += `<br>atteint à ${fmtH(run.maxima.tmax[c.k])}`;
+    const f = state.lastFlow;
+    if (f && f.qf[c.k]) html += `<br>débit ${fmtNum(dequantizeFlow(f.qf[c.k]), 2)} m³/s par mètre de large`;
     tip.innerHTML = html;
     // Bulle placée près du curseur, en restant dans la carte
     const box = state.map.getContainer().getBoundingClientRect();
@@ -2357,7 +2528,7 @@ async function openSaved(id) {
     };
     showContext(state.data);
     const store = new SnapshotStore();
-    store.items = r.snaps.map((s) => ({ t: s.t, data: s.blob }));
+    store.items = r.snaps.map((s) => ({ t: s.t, data: s.blob, fdata: s.fblob, vdata: s.vblob, vmeta: s.vmeta }));
     const run = {
       running: false,
       stop: false,
@@ -2554,6 +2725,7 @@ async function main() {
   renderObstacles(); // la carte est prête : affiche les ouvrages enregistrés
   setupBasemap();
   setupMapToggles();
+  addArrowLayer();
   // Accès à l'état depuis la console du navigateur (diagnostic).
   window.floodApp = state;
   state.water3d = new Water3DLayer();

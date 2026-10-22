@@ -4,6 +4,7 @@
 
 import { G, H_MIN, FROUDE_MAX, V_MAX, BOUNDARY_SLOPE, THETA, stableDt } from './scheme.js';
 import { IA_RATIO } from '../hydrology/scs.js';
+import { fluxFields } from './flux.js';
 
 const WG = 16;
 const STEP_STRIDE = 256; // alignement minimal des décalages dynamiques
@@ -475,6 +476,13 @@ export class GpuSolver {
 
   readDepth() {
     return this.#read(this.bufs.h, this.N * 4);
+  }
+
+  /** Débit pour l'affichage (intensité par maille, direction par bloc). */
+  async readFlux() {
+    const qx = await this.#read(this.bufs.qx[this.cur], (this.nx + 1) * this.ny * 4);
+    const qy = await this.#read(this.bufs.qy[this.cur], this.nx * (this.ny + 1) * 4);
+    return fluxFields(qx, qy, this.nx, this.ny);
   }
 
   async readMaxima() {

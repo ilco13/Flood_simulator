@@ -39,11 +39,16 @@ const { chromium } = require(process.env.PLAYWRIGHT || 'playwright');
     let dmaxMax = 0;
     for (let k = 0; k < N; k++) dmaxMax = Math.max(dmaxMax, Math.abs(rc.maxima.hmax[k] - rg.maxima.hmax[k]));
     const peakC = Math.max(...qc), peakG = Math.max(...qg);
-    return { stepsCpu: cpu.steps, stepsGpu: g.steps, hmax: hmaxc, maxDiffH: dmax, maxDiffHmax: dmaxMax, peakC, peakG, adapter: gpu.label };
+    // Débit pour l'affichage : même lecture côté GPU et CPU
+    const fc = await cpu.readFlux(), fg = await g.readFlux();
+    let sc = 0, sg = 0;
+    for (let k = 0; k < N; k++) { sc += fc.qm[k]; sg += fg.qm[k]; }
+    const flowRel = Math.abs(sc - sg) / Math.max(1e-9, sc);
+    return { stepsCpu: cpu.steps, stepsGpu: g.steps, hmax: hmaxc, maxDiffH: dmax, maxDiffHmax: dmaxMax, peakC, peakG, flowSumCpu: sc, flowSumGpu: sg, flowRel, blocks: [fg.vec.bx, fg.vec.by], adapter: gpu.label };
   });
   console.log(JSON.stringify(out, null, 1));
   await browser.close();
-  const ok = out.maxDiffHmax < 0.02 && Math.abs(out.peakC - out.peakG) / out.peakC < 0.03;
+  const ok = out.maxDiffHmax < 0.02 && Math.abs(out.peakC - out.peakG) / out.peakC < 0.03 && out.flowRel < 0.05;
   console.log(ok ? 'GPU ≈ CPU : OK' : 'ÉCART GPU/CPU');
   process.exit(ok ? 0 : 1);
 })();

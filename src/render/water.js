@@ -1,6 +1,7 @@
 // Rendu de la hauteur d'eau (quantifiée 8 bits) en image RGBA bleue semi-transparente.
 
 import { dequantize } from '../sim/snapshots.js';
+import { dequantizeFlow } from '../sim/flux.js';
 
 // Palettes de couleurs (de la lame d'eau la plus faible à la plus profonde).
 export const PALETTES = {
@@ -77,6 +78,29 @@ export function buildLut({ runoff = false, palette = 'bleus', scale = 'standard'
       [r, g, b] = c.rgb;
       al = Math.round(c.alpha * 255);
     }
+    lut[v] = (al << 24) | (b << 16) | (g << 8) | r;
+  }
+  return lut;
+}
+
+// Débit par mètre de largeur (m²/s) : viridis classique, du violet (faible) au jaune (fort).
+const VIRIDIS = [[68, 1, 84], [65, 68, 135], [42, 120, 142], [34, 168, 132], [122, 209, 81], [253, 231, 37]];
+export const FLOW_BREAKS = [0.02, 0.05, 0.1, 0.25, 0.5, 1, 2, 5];
+
+/** Paliers de la légende du débit. */
+export function flowLegendStops() {
+  return FLOW_BREAKS.map((d, i) => ({ d, rgb: paletteAt(VIRIDIS, i / (FLOW_BREAKS.length - 1)) }));
+}
+
+/** Table valeur de débit quantifiée -> pixel RGBA (viridis, transparent sous 2 cm²/s… 0,02 m²/s). */
+export function buildFlowLut() {
+  const lut = new Uint32Array(256);
+  for (let v = 1; v < 256; v++) {
+    const d = dequantizeFlow(v);
+    if (d < FLOW_BREAKS[0]) continue;
+    const t = scalePos(FLOW_BREAKS, d);
+    const [r, g, b] = paletteAt(VIRIDIS, t);
+    const al = Math.round(lerp(0.55, 0.9, t) * 255);
     lut[v] = (al << 24) | (b << 16) | (g << 8) | r;
   }
   return lut;

@@ -214,7 +214,12 @@
             <button id="res-min" class="icon-ghost" type="button" title="Réduire / agrandir">▾</button>
           </div>
           <div class="rdock-body">
-            <label class="check small"><input type="checkbox" id="runoff" checked /> Afficher le ruissellement (lame d'eau mince, en turquoise)</label>
+            <div class="seg small" id="layer-mode" role="radiogroup">
+              <button data-v="depth" class="on" role="radio">Hauteur d'eau</button>
+              <button data-v="flow" role="radio">Débit</button>
+            </div>
+            <label class="check small"><input type="checkbox" id="arrows" checked /> Flèches : sens et force du courant</label>
+            <label class="check small" id="runoff-row"><input type="checkbox" id="runoff" checked /> Afficher le ruissellement (lame d'eau mince, en turquoise)</label>
             <h3>Débits (m³/s)</h3>
             <canvas id="hydro" class="chart" aria-label="Hydrogrammes"></canvas>
             <div id="gauge-legend" class="legend gauges"></div>

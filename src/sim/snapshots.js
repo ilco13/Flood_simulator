@@ -1,6 +1,8 @@
 // Stockage des hauteurs d'eau successives, quantifiées sur 8 bits et compressées.
 // Échelle racine carrée : précision ~1 cm vers 10 cm, ~5 cm vers 2 m, plafond 12 m.
 
+import { quantizeFlow, packVec, unpackVec } from './flux.js';
+
 export const DEPTH_CAP = 12;
 // En dessous d'1 cm on stocke 0 : la lame d'eau de ruissellement diffus ne nous intéresse
 // pas et cela rend les instantanés très compressibles.
@@ -38,21 +40,49 @@ export async function decompress(stored) {
 
 export class SnapshotStore {
   constructor() {
-    this.items = []; // { t, data }
+    this.items = []; // { t, data, fdata?, vdata?, vmeta? }
     this.cache = new Map();
+    this.fcache = new Map();
     this.bytes = 0;
   }
-  async add(t, h) {
+  /** Ajoute un instantané : hauteurs, et si fourni le débit (intensité et flèches). */
+  async add(t, h, flux = null) {
     const q = quantize(h);
     const data = await compress(q);
-    this.items.push({ t, data });
+    const item = { t, data };
+    if (flux) {
+      const qf = quantizeFlow(flux.qm);
+      const pv = packVec(flux.vec);
+      item.fdata = await compress(qf);
+      item.vdata = await compress(new Uint8Array(pv.buffer));
+      item.vmeta = { B: flux.vec.B, bx: flux.vec.bx, by: flux.vec.by };
+      this.fcache.set(this.items.length, { qf, vec: unpackVec(pv, flux.vec.B, flux.vec.bx, flux.vec.by) });
+    }
+    this.items.push(item);
     this.bytes += data.size ?? data.byteLength;
     this.cache.set(this.items.length - 1, q);
     this.#trim();
     return q;
   }
+  get hasFlow() {
+    return this.items.some((it) => it.fdata);
+  }
+  /** Débit d'un instantané : { qf (Uint8, quantifié), vec } ou null. */
+  async getFlow(i) {
+    if (this.fcache.has(i)) return this.fcache.get(i);
+    const it = this.items[i];
+    if (!it?.fdata) return null;
+    const qf = await decompress(it.fdata);
+    const vb = await decompress(it.vdata);
+    const vec = unpackVec(new Int16Array(vb.buffer, vb.byteOffset, vb.byteLength / 2), it.vmeta.B, it.vmeta.bx, it.vmeta.by);
+    const f = { qf, vec };
+    this.fcache.set(i, f);
+    this.#trim();
+    return f;
+  }
   #trim() {
     while (this.cache.size > 4) this.cache.delete(this.cache.keys().next().value);
+    while (this.fcache.size > 4) this.fcache.delete(this.fcache.keys().next().value);
   }
   get length() {
     return this.items.length;
