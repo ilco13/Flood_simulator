@@ -348,6 +348,28 @@ export function drawSection(canvas, s) {
   ctx.stroke();
   ctx.restore();
 
+  // Ruissellement (lame d'eau de 1 à 10 cm hors des zones en eau) : liseré qui suit le terrain,
+  // épaissi avec la hauteur — invisible à l'échelle de la coupe s'il était tracé en vraie grandeur.
+  if (s.runoff) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(pad.l, pad.t, pw, ph);
+    ctx.clip();
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = 'rgba(60, 225, 190, 0.9)';
+    for (let i = 1; i < n; i++) {
+      const h = Math.min(pts[i].h, pts[i - 1].h);
+      if (!(h > 0.01) || level[i] > ground[i] || level[i - 1] > ground[i - 1]) continue;
+      if (!Number.isFinite(ground[i]) || !Number.isFinite(ground[i - 1])) continue;
+      ctx.lineWidth = 2 + Math.min(4, h * 40);
+      ctx.beginPath();
+      ctx.moveTo(X(pts[i - 1].d), Y(ground[i - 1]) - 1);
+      ctx.lineTo(X(pts[i].d), Y(ground[i]) - 1);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   // Niveau maximal atteint : pointillé
   ctx.save();
   ctx.setLineDash([5, 4]);

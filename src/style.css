@@ -613,6 +613,12 @@ button.icon {
   height: 0;
   vertical-align: 3px;
 }
+.legend i.sw-runoff {
+  background: rgb(60, 225, 190);
+  border-radius: 2px;
+  height: 4px;
+  vertical-align: 2px;
+}
 .legend i.sw-soil {
   background: #b48a5c;
   border-top: 3px solid #5f8f3a;

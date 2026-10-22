@@ -321,6 +321,8 @@ function setupUi() {
   $('runoff').addEventListener('change', () => {
     state.runoff = $('runoff').checked;
     applyColors();
+    $('sec-runoff').hidden = !state.runoff;
+    redrawSection(false);
   });
   setupColors();
   $('soil').addEventListener('input', renderSoilInfo);
@@ -2361,7 +2363,7 @@ function redrawSection(resample = true) {
     });
   }
   const timeLabel = state.viewMode === 'max' || state.cursorT == null ? 'Maximum atteint' : `À ${fmtH(state.cursorT)}`;
-  sec.helper = drawSection($('section-canvas'), { ...sec.sample, raise: obstacleRaise(sec.sample.pts), fine: sec.fine, timeLabel, hover: sec.hover, cell: grid.dx });
+  sec.helper = drawSection($('section-canvas'), { ...sec.sample, raise: obstacleRaise(sec.sample.pts), fine: sec.fine, runoff: state.runoff, timeLabel, hover: sec.hover, cell: grid.dx });
 }
 
 /* ---------- Simulations enregistrées ---------- */
