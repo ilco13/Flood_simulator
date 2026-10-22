@@ -2426,6 +2426,41 @@ function toggle3d(on) {
   }
 }
 
+/* ---------- Boutons Routes / Cours d'eau / Noms ---------- */
+
+const TOGGLES_KEY = 'flood-sim-toggles';
+
+function setupMapToggles() {
+  let on = { roads: true, water: true, names: true };
+  try {
+    on = { ...on, ...JSON.parse(localStorage.getItem(TOGGLES_KEY) || '{}') };
+  } catch {
+    /* rien */
+  }
+  state.toggles = on;
+  $('map-toggles').addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    state.toggles[b.dataset.g] = !state.toggles[b.dataset.g];
+    applyMapToggles();
+    try {
+      localStorage.setItem(TOGGLES_KEY, JSON.stringify(state.toggles));
+    } catch {
+      /* rien */
+    }
+  });
+  applyMapToggles();
+}
+
+function applyMapToggles() {
+  const map = state.map;
+  const g = state.overlayGroups || { roads: [], water: [], names: [] };
+  const ids = { roads: g.roads, water: [...g.water, 'rivers'], names: g.names };
+  for (const [k, list] of Object.entries(ids))
+    for (const id of list) if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', state.toggles[k] ? 'visible' : 'none');
+  $('map-toggles').querySelectorAll('button').forEach((b) => b.classList.toggle('on', !!state.toggles[b.dataset.g]));
+}
+
 /* ---------- Fond de carte : photo ou ombrages LiDAR HD ---------- */
 
 const BASEMAP_KEY = 'flood-sim-basemap';
@@ -2470,6 +2505,7 @@ async function main() {
   const [map, gpu] = await Promise.all([createMap($('map')), getGpuDevice()]);
   state.map = map.map;
   state.overlayIds = map.overlayIds;
+  state.overlayGroups = map.overlayGroups;
   state.gpu = gpu;
   $('engine-info').textContent = gpu
     ? `Carte graphique détectée${gpu.label ? ` : ${gpu.label}` : ''}.`
@@ -2517,6 +2553,7 @@ async function main() {
   });
   renderObstacles(); // la carte est prête : affiche les ouvrages enregistrés
   setupBasemap();
+  setupMapToggles();
   // Accès à l'état depuis la console du navigateur (diagnostic).
   window.floodApp = state;
   state.water3d = new Water3DLayer();

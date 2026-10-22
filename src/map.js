@@ -14,6 +14,8 @@ const ROAD_LAYERS = new Set([
   'ferre',
   'ferre_sup',
 ]);
+// Réseau hydrographique du Plan IGN (toujours disponible, même avant une simulation)
+const WATER_LAYERS = new Set(['hydro_reseau', 'hydro_reseau_sup']);
 const isLabelLayer = (sl) =>
   sl?.startsWith('toponyme_') && !sl.startsWith('toponyme_parcellaire') && sl !== 'toponyme_routier_borne';
 
@@ -34,12 +36,35 @@ async function tryLoadPlanIgn() {
     const res = await fetch(PLAN_IGN_STYLE);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const style = await res.json();
-    const layers = style.layers.filter((l) => {
-      const sl = l['source-layer'];
-      if (l.type === 'line' && ROAD_LAYERS.has(sl)) return true;
-      if (l.type === 'symbol' && isLabelLayer(sl)) return true;
-      return false;
-    });
+    const layers = style.layers
+      .filter((l) => {
+        const sl = l['source-layer'];
+        if (l.type === 'line' && (ROAD_LAYERS.has(sl) || WATER_LAYERS.has(sl))) return true;
+        if (l.type === 'symbol' && isLabelLayer(sl)) return true;
+        return false;
+      })
+      .map((l) => {
+        const sl = l['source-layer'];
+        // Groupe de chaque couche, pour les boutons « Routes / Cours d'eau / Noms »
+        const group =
+          ROAD_LAYERS.has(sl) || sl.startsWith('toponyme_routier') || sl.startsWith('toponyme_ferre')
+            ? 'roads'
+            : WATER_LAYERS.has(sl) || sl.startsWith('toponyme_hydro')
+              ? 'water'
+              : 'names';
+        if (l.type === 'line' && WATER_LAYERS.has(sl))
+          // Cours d'eau bien visibles sur la photo : bleu vif, plus épais en zoomant.
+          l = {
+            ...l,
+            paint: {
+              ...l.paint,
+              'line-color': '#3fb4ff',
+              'line-opacity': 0.9,
+              'line-width': ['interpolate', ['linear'], ['zoom'], 11, 0.8, 14, 1.6, 17, 3],
+            },
+          };
+        return { ...l, metadata: { ...(l.metadata || {}), group } };
+      });
     return { sources: style.sources, glyphs: style.glyphs, sprite: style.sprite, layers };
   }
 }
@@ -295,7 +320,9 @@ export async function createMap(container) {
     };
     map.once('load', done);
   });
-  return { map, overlayIds: (overlay?.layers || []).map((l) => l.id) };
+  const groups = { roads: [], water: [], names: [] };
+  for (const l of overlay?.layers || []) groups[l.metadata.group].push(l.id);
+  return { map, overlayIds: (overlay?.layers || []).map((l) => l.id), overlayGroups: groups };
 }
 
 /** Ajoute ou remplace la couche d'eau (canvas) positionnée sur la grille Lambert 93. */

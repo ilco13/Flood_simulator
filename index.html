@@ -158,9 +158,7 @@
               </label>
               <h3>Couches de la carte</h3>
               <label class="check"><input type="checkbox" data-layer="water" checked /> Eau simulée</label>
-              <label class="check"><input type="checkbox" data-layer="rivers" checked /> Cours d'eau (BD TOPO)</label>
               <label class="check"><input type="checkbox" data-layer="basin" checked /> Limite du bassin simulé</label>
-              <label class="check"><input type="checkbox" data-layer="labels" checked /> Routes et noms de lieux</label>
               <label class="check"><input type="checkbox" data-layer="shadow" /> Ombrage du relief</label>
               <label class="check"><input type="checkbox" id="relief3d" /> Relief 3D et nappe d'eau en volume</label>
               <label>Exagération du relief en 3D <span id="exag-label">×1.5</span>
@@ -194,6 +192,11 @@
           <button type="button" data-v="photo" class="on" title="Photo aérienne IGN">Photo</button>
           <button type="button" data-v="mnt" title="Relief LiDAR HD du sol nu : celui qu'utilise la simulation">LiDAR sol</button>
           <button type="button" data-v="mns" title="Relief LiDAR HD avec bâtiments et arbres (en 3D aussi)">LiDAR + bâti</button>
+        </div>
+        <div id="map-toggles" class="map-toggles" aria-label="Éléments affichés">
+          <button type="button" data-g="roads" class="on" title="Routes, voies ferrées et leurs noms">Routes</button>
+          <button type="button" data-g="water" class="on" title="Cours d'eau et leurs noms">Cours d'eau</button>
+          <button type="button" data-g="names" class="on" title="Noms des villes, villages et lieux-dits">Noms</button>
         </div>
         <div id="draw-bar" hidden>
           <span id="draw-hint"></span>

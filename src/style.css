@@ -1242,3 +1242,45 @@ details.advanced h3 {
     bottom: 132px;
   }
 }
+
+/* Boutons Routes / Cours d'eau / Noms (sous le choix du fond de carte) */
+.map-toggles {
+  position: absolute;
+  right: 54px;
+  top: 48px;
+  z-index: 4;
+  display: flex;
+  gap: 4px;
+}
+.map-toggles button {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  text-decoration: line-through;
+}
+.map-toggles button.on {
+  color: var(--text);
+  text-decoration: none;
+  border-color: var(--accent);
+}
+.map-toggles button.on::before {
+  content: '✓ ';
+  color: var(--accent);
+}
+@media (max-width: 760px) {
+  .map-toggles {
+    right: auto;
+    top: auto;
+    left: 8px;
+    bottom: 128px;
+  }
+  #map-status {
+    bottom: 166px;
+  }
+}
