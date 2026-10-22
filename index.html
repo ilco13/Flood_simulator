@@ -190,6 +190,11 @@
       <main id="map">
         <div id="map-status" hidden></div>
         <div id="map-tip" hidden></div>
+        <div id="basemap" class="basemap" role="radiogroup" aria-label="Fond de carte">
+          <button type="button" data-v="photo" class="on" title="Photo aérienne IGN">Photo</button>
+          <button type="button" data-v="mnt" title="Relief LiDAR HD du sol nu : celui qu'utilise la simulation">LiDAR sol</button>
+          <button type="button" data-v="mns" title="Relief LiDAR HD avec bâtiments et arbres (en 3D aussi)">LiDAR + bâti</button>
+        </div>
         <div id="draw-bar" hidden>
           <span id="draw-hint"></span>
           <button id="draw-undo" class="chip-btn" type="button">Annuler le point</button>

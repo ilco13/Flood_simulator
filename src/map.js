@@ -1,6 +1,6 @@
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { ORTHO_TILES, SHADOW_TILES, PLAN_IGN_STYLE, DOMAIN } from './config.js';
+import { ORTHO_TILES, SHADOW_TILES, PLAN_IGN_STYLE, DOMAIN, LIDAR_SHADE } from './config.js';
 import { toWgs } from './geo.js';
 
 const EMPTY = { type: 'FeatureCollection', features: [] };
@@ -61,6 +61,8 @@ export async function createMap(container) {
         attribution: '© IGN – BD ORTHO, LiDAR HD, COSIA, BD TOPO, Plan IGN',
       },
       shadow: { type: 'raster', tiles: [SHADOW_TILES], tileSize: 256, maxzoom: 18 },
+      'lidar-mnt': { type: 'raster', tiles: [LIDAR_SHADE.mnt], tileSize: 256, maxzoom: 18, attribution: '© IGN – LiDAR HD' },
+      'lidar-mns': { type: 'raster', tiles: [LIDAR_SHADE.mns], tileSize: 256, maxzoom: 18, attribution: '© IGN – LiDAR HD' },
       rivers: { type: 'geojson', data: EMPTY },
       basin: { type: 'geojson', data: EMPTY },
       catchment: { type: 'geojson', data: EMPTY },
@@ -81,6 +83,9 @@ export async function createMap(container) {
         layout: { visibility: 'none' },
         paint: { 'raster-opacity': 0.35 },
       },
+      // Fonds LiDAR HD (ombrages), à la place de la photo aérienne
+      { id: 'lidar-mnt', type: 'raster', source: 'lidar-mnt', layout: { visibility: 'none' } },
+      { id: 'lidar-mns', type: 'raster', source: 'lidar-mns', layout: { visibility: 'none' } },
       // La couche d'eau est insérée ici (avant 'rivers').
       {
         id: 'rivers',

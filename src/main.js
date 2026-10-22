@@ -2417,12 +2417,48 @@ function toggle3d(on) {
   state.is3d = on;
   $('relief3d').checked = on;
   state.ctrl3d.set(on);
-  setTerrain3d(state.map, on, Number($('exag').value));
+  setTerrain3d(state.map, on, Number($('exag').value), state.basemap === 'mns');
   // En 3D, la couche drapée s'efface au profit de la nappe en volume.
   if (state.map.getLayer('water')) state.map.setPaintProperty('water', 'raster-opacity', on ? 0.45 : 1);
   if (on) {
     ensureWater3d();
     if (state.lastQ) state.water3d.setDepth(state.lastQ);
+  }
+}
+
+/* ---------- Fond de carte : photo ou ombrages LiDAR HD ---------- */
+
+const BASEMAP_KEY = 'flood-sim-basemap';
+
+function setupBasemap() {
+  let v = 'photo';
+  try {
+    v = localStorage.getItem(BASEMAP_KEY) || 'photo';
+  } catch {
+    /* rien */
+  }
+  $('basemap').addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (b) setBasemap(b.dataset.v);
+  });
+  setBasemap(v);
+}
+
+/** photo | mnt (sol nu, relief de la simulation) | mns (avec bâtiments et arbres) */
+function setBasemap(v) {
+  if (!['photo', 'mnt', 'mns'].includes(v)) v = 'photo';
+  state.basemap = v;
+  const map = state.map;
+  map.setLayoutProperty('ortho', 'visibility', v === 'photo' ? 'visible' : 'none');
+  map.setLayoutProperty('lidar-mnt', 'visibility', v === 'mnt' ? 'visible' : 'none');
+  map.setLayoutProperty('lidar-mns', 'visibility', v === 'mns' ? 'visible' : 'none');
+  $('basemap').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === v));
+  // En 3D, le relief suit le fond choisi : sol nu, ou bâtiments et arbres.
+  if (state.is3d) setTerrain3d(map, true, Number($('exag').value), v === 'mns');
+  try {
+    localStorage.setItem(BASEMAP_KEY, v);
+  } catch {
+    /* rien */
   }
 }
 
@@ -2480,6 +2516,7 @@ async function main() {
     finishDrawing();
   });
   renderObstacles(); // la carte est prête : affiche les ouvrages enregistrés
+  setupBasemap();
   // Accès à l'état depuis la console du navigateur (diagnostic).
   window.floodApp = state;
   state.water3d = new Water3DLayer();

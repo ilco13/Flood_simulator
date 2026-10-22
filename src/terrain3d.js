@@ -8,6 +8,7 @@ import { fetchWithRetry } from './data/wms.js';
 const HALF = 20037508.342789244;
 const TILE = 256;
 export const DEM_SOURCE = 'lidar-dem';
+export const DSM_SOURCE = 'lidar-dsm'; // modèle de surface : bâtiments et arbres en relief
 
 function tileBbox(z, x, y) {
   const size = (2 * HALF) / 2 ** z;
@@ -30,11 +31,11 @@ function wmsUrl(layer, b) {
   return `${WMS_R}?${p}`;
 }
 
-async function loadElevation(z, x, y, signal) {
+async function loadElevation(z, x, y, signal, surface = false) {
   const b = tileBbox(z, x, y);
   let data = null;
   try {
-    data = new Float32Array(await fetchWithRetry(wmsUrl(LAYERS.dem, b), { tries: 3, signal }));
+    data = new Float32Array(await fetchWithRetry(wmsUrl(surface ? LAYERS.dsm : LAYERS.dem, b), { tries: 3, signal }));
   } catch (e) {
     if (signal?.aborted) throw e;
   }
@@ -42,7 +43,7 @@ async function loadElevation(z, x, y, signal) {
   if (data) for (let k = 0; k < data.length && !holes; k++) if (!(data[k] > -1000)) holes = true;
   if (holes) {
     try {
-      const fb = new Float32Array(await fetchWithRetry(wmsUrl(LAYERS.demFallback, b), { tries: 2, signal }));
+      const fb = new Float32Array(await fetchWithRetry(wmsUrl(surface ? LAYERS.dem : LAYERS.demFallback, b), { tries: 2, signal }));
       if (!data) data = fb;
       else for (let k = 0; k < data.length; k++) if (!(data[k] > -1000)) data[k] = fb[k];
     } catch (e) {
@@ -79,9 +80,9 @@ export function registerLidarProtocol() {
   if (registered) return;
   registered = true;
   maplibregl.addProtocol('lidar', async (params, abortController) => {
-    const m = /lidar:\/\/(\d+)\/(\d+)\/(\d+)/.exec(params.url);
-    const [z, x, y] = m.slice(1).map(Number);
-    const h = await loadElevation(z, x, y, abortController.signal);
+    const m = /lidar:\/\/(?:(mns)\/)?(\d+)\/(\d+)\/(\d+)/.exec(params.url);
+    const [z, x, y] = m.slice(2).map(Number);
+    const h = await loadElevation(z, x, y, abortController.signal, m[1] === 'mns');
     return { data: await encodeTerrarium(h) };
   });
 }
@@ -90,15 +91,16 @@ export function registerLidarProtocol() {
 export function addDemSource(map) {
   registerLidarProtocol();
   if (map.getSource(DEM_SOURCE)) return;
-  map.addSource(DEM_SOURCE, {
-    type: 'raster-dem',
-    tiles: ['lidar://{z}/{x}/{y}'],
-    tileSize: TILE,
-    encoding: 'terrarium',
-    minzoom: 8,
-    maxzoom: 16,
-    attribution: '© IGN – LiDAR HD',
-  });
+  for (const [id, url] of [[DEM_SOURCE, 'lidar://{z}/{x}/{y}'], [DSM_SOURCE, 'lidar://mns/{z}/{x}/{y}']])
+    map.addSource(id, {
+      type: 'raster-dem',
+      tiles: [url],
+      tileSize: TILE,
+      encoding: 'terrarium',
+      minzoom: 8,
+      maxzoom: 16,
+      attribution: '© IGN – LiDAR HD',
+    });
 }
 
 /**
@@ -116,14 +118,20 @@ function clampCenterToGround(map) {
 let moveEndHandler = null;
 
 /** Active ou désactive le relief 3D. */
-export function setTerrain3d(map, on, exaggeration = 1.5) {
+export function setTerrain3d(map, on, exaggeration = 1.5, surface = false) {
   addDemSource(map);
   if (moveEndHandler) {
     map.off('moveend', moveEndHandler);
     moveEndHandler = null;
   }
   if (on) {
-    map.setTerrain({ source: DEM_SOURCE, exaggeration });
+    const wasOn = !!map.getTerrain();
+    map.setTerrain({ source: surface ? DSM_SOURCE : DEM_SOURCE, exaggeration });
+    if (wasOn) {
+      moveEndHandler = () => clampCenterToGround(map);
+      map.on('moveend', moveEndHandler);
+      return;
+    }
     moveEndHandler = () => clampCenterToGround(map);
     map.on('moveend', moveEndHandler);
     // On n'incline la vue qu'une fois le relief chargé.
@@ -141,7 +149,7 @@ export function setTerrain3d(map, on, exaggeration = 1.5) {
 /** Change l'exagération en gardant la caméra au-dessus du sol. */
 export function setExaggeration(map, exaggeration) {
   if (!map.getTerrain()) return;
-  map.setTerrain({ source: DEM_SOURCE, exaggeration });
+  map.setTerrain({ source: map.getTerrain().source, exaggeration });
   map.once('idle', () => clampCenterToGround(map));
 }
 

@@ -119,26 +119,50 @@ function lineParts(geom) {
   return [];
 }
 
-/** Liste des mailles traversées par une polyligne (pas de dx/2). */
+/**
+ * Mailles traversées par une polyligne, dans l'ordre, reliées par un côté (chemin 4-connexe :
+ * l'eau du modèle ne passe que par les côtés des mailles, jamais par un coin).
+ * Parcours exact de la grille (Amanatides & Woo) ; les mailles hors grille sont ignorées.
+ */
 export function rasterizeLine(grid, coords, visit) {
-  const step = grid.dx / 2;
+  const { xmin, ymax, dx, nx, ny } = grid;
   let last = -1;
+  const emit = (i, j) => {
+    if (i < 0 || j < 0 || i >= nx || j >= ny) return;
+    const k = j * nx + i;
+    if (k !== last) {
+      visit(k, i, j);
+      last = k;
+    }
+  };
   for (let s = 0; s < coords.length - 1; s++) {
-    const [x0, y0] = coords[s];
-    const [x1, y1] = coords[s + 1];
-    const L = Math.hypot(x1 - x0, y1 - y0);
-    const n = Math.max(1, Math.ceil(L / step));
-    for (let t = 0; t <= n; t++) {
-      const x = x0 + ((x1 - x0) * t) / n;
-      const y = y0 + ((y1 - y0) * t) / n;
-      const i = Math.floor((x - grid.xmin) / grid.dx);
-      const j = Math.floor((grid.ymax - y) / grid.dx);
-      if (i < 0 || j < 0 || i >= grid.nx || j >= grid.ny) continue;
-      const k = j * grid.nx + i;
-      if (k !== last) {
-        visit(k, i, j);
-        last = k;
+    const gx0 = (coords[s][0] - xmin) / dx;
+    const gy0 = (ymax - coords[s][1]) / dx;
+    const gx1 = (coords[s + 1][0] - xmin) / dx;
+    const gy1 = (ymax - coords[s + 1][1]) / dx;
+    let i = Math.floor(gx0);
+    let j = Math.floor(gy0);
+    const i1 = Math.floor(gx1);
+    const j1 = Math.floor(gy1);
+    const ddx = gx1 - gx0;
+    const ddy = gy1 - gy0;
+    const si = Math.sign(ddx);
+    const sj = Math.sign(ddy);
+    const tdx = si ? Math.abs(1 / ddx) : Infinity;
+    const tdy = sj ? Math.abs(1 / ddy) : Infinity;
+    let tx = si > 0 ? (i + 1 - gx0) * tdx : si < 0 ? (gx0 - i) * tdx : Infinity;
+    let ty = sj > 0 ? (j + 1 - gy0) * tdy : sj < 0 ? (gy0 - j) * tdy : Infinity;
+    emit(i, j);
+    let guard = Math.abs(i1 - i) + Math.abs(j1 - j) + 2;
+    while ((i !== i1 || j !== j1) && guard-- > 0) {
+      if (tx < ty) {
+        i += si;
+        tx += tdx;
+      } else {
+        j += sj;
+        ty += tdy;
       }
+      emit(i, j);
     }
   }
 }
@@ -152,10 +176,13 @@ export function burnRivers(grid, z, rivers, depth) {
   const z0 = z.slice();
   const { nx, ny } = grid;
   let count = 0;
+  const paths = [];
   for (const f of rivers.features) {
     if (!isBurnable(f)) continue;
     for (const part of lineParts(f.geometry)) {
+      const path = [];
       rasterizeLine(grid, part, (k, i, j) => {
+        path.push(k);
         let m = z0[k];
         for (let dj = -1; dj <= 1; dj++) {
           const jj = j + dj;
@@ -173,6 +200,54 @@ export function burnRivers(grid, z, rivers, depth) {
           count++;
         }
       });
+      if (path.length < 2) continue;
+      // Sens d'écoulement : altitudes BD TOPO (3e coordonnée) ou, à défaut, relief aux extrémités.
+      const za = part[0][2];
+      const zb = part[part.length - 1][2];
+      const up = Number.isFinite(za) && Number.isFinite(zb) && za !== zb ? za > zb : z0[path[0]] >= z0[path[path.length - 1]];
+      if (!up) path.reverse();
+      paths.push(path);
+    }
+  }
+  count += enforceDownstream(grid, z, paths);
+  return count;
+}
+
+// Au-delà, l'obstacle est sans doute un vrai barrage (retenue) : on ne le creuse pas.
+const MAX_CARVE = 15;
+
+/**
+ * Pente continue vers l'aval le long du réseau : le MNT garde souvent les ponts et les remblais
+ * percés d'une buse comme un barrage (tablier interpolé). Chaque tronçon est parcouru de l'amont
+ * vers l'aval (les plus hauts d'abord) et une maille plus haute que la précédente est abaissée
+ * à son niveau ; un tronçon démarre au niveau du tronçon amont déjà traité qui le touche.
+ */
+function enforceDownstream(grid, z, paths) {
+  const { nx, ny } = grid;
+  const done = new Uint8Array(nx * ny);
+  let count = 0;
+  paths.sort((a, b) => z[b[0]] - z[a[0]]);
+  for (const path of paths) {
+    const k0 = path[0];
+    const i0 = k0 % nx;
+    const j0 = (k0 - i0) / nx;
+    let level = z[k0];
+    for (let dj = -1; dj <= 1; dj++)
+      for (let di = -1; di <= 1; di++) {
+        const ii = i0 + di;
+        const jj = j0 + dj;
+        if (ii < 0 || jj < 0 || ii >= nx || jj >= ny) continue;
+        const kk = jj * nx + ii;
+        if (done[kk] && z[kk] < level) level = z[kk];
+      }
+    for (const k of path) {
+      if (z[k] > level) {
+        if (z[k] - level <= MAX_CARVE) {
+          z[k] = level;
+          count++;
+        } else level = z[k];
+      } else level = z[k];
+      done[k] = 1;
     }
   }
   return count;

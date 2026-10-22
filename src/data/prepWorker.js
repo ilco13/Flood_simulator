@@ -75,8 +75,21 @@ self.onmessage = async (e) => {
     step('prep', 0.4);
     const terrain = prepareTerrain({ grid, dem, rivers, burnDepth, outlet, upstreamOf, obstacles });
     // Points de suivi : seulement ceux qui coupent le bassin simulé.
+    // Ceux du lieu étudié sont toujours gardés (leur ligne de mesure est à l'exutoire, juste
+    // à l'aval du bassin) ; les points de l'Arc seulement s'ils touchent le bassin simulé.
+    const nearMask = (k) => {
+      const i = k % grid.nx;
+      const j = (k - i) / grid.nx;
+      for (let dj = -2; dj <= 2; dj++)
+        for (let di = -2; di <= 2; di++) {
+          const ii = i + di;
+          const jj = j + dj;
+          if (ii >= 0 && jj >= 0 && ii < grid.nx && jj < grid.ny && terrain.mask[jj * grid.nx + ii]) return true;
+        }
+      return false;
+    };
     const gauges = buildGauges(grid, rivers, gaugeDefs).filter(
-      (g) => !terrain.mask || Array.from(g.cells).some((k) => terrain.mask[k] || terrain.mask[k + 1] || terrain.mask[k + grid.nx]),
+      (g) => !terrain.mask || String(g.id).startsWith('study') || Array.from(g.cells).some(nearMask),
     );
 
     const outline = terrain.mask ? outlineWgs(terrain.mask, grid) : [];

@@ -5,6 +5,7 @@ import { runoffMm, runoffRate, retentionMm, adjustCn } from '../src/hydrology/sc
 import { CpuBackend, simulate } from '../src/sim/driver.js';
 import { CpuSolver } from '../src/sim/cpuSolver.js';
 import { buildGauges, prepareTerrain } from '../src/sim/model.js';
+import { rasterizeLine } from '../src/data/rivers.js';
 import { drainageLabels, basinMask, accumulation, upstreamMask, flowDirections } from '../src/hydrology/terrain.js';
 
 let failures = 0;
@@ -222,6 +223,35 @@ await test('mur dessiné : relevé dans le relief et jamais percé par le débr�
   let raised = 0;
   for (let k = 0; k < t2.z.length; k++) if (t2.z[k] - dem[k] > 5.9) raised++;
   assert.equal(raised, 4 * 6); // 20 m × 30 m = 4 × 6 mailles de 5 m
+});
+
+await test('pont en remblai dans le MNT : lit creusé en pente continue vers l\'aval (maille 2 m)', () => {
+  // Lit nord → sud dans une vallée, remblai routier de 4,7 m sur 8 m de large en travers.
+  const nx = 60;
+  const ny = 100;
+  const dx = 2;
+  const grid = { xmin: 0, ymin: 0, xmax: nx * dx, ymax: ny * dx, nx, ny, dx };
+  const dem = new Float32Array(nx * ny);
+  for (let j = 0; j < ny; j++)
+    for (let i = 0; i < nx; i++) {
+      let zz = 240 - j * 0.04 + Math.abs(i - 30) * 0.3;
+      if (j >= 48 && j < 52) zz = Math.max(zz, 238.7); // tablier interpolé
+      dem[j * nx + i] = zz;
+    }
+  // Tracé BD TOPO (avec altitudes, de l'amont vers l'aval), légèrement de biais
+  const rivers = {
+    features: [{ type: 'Feature', properties: { nature: 'Ecoulement naturel' }, geometry: { type: 'LineString', coordinates: [[61, 199, 240], [59, 1, 236]] } }],
+  };
+  const t = prepareTerrain({ grid, dem, rivers, burnDepth: 0.5 });
+  const cells = [];
+  rasterizeLine(grid, [[61, 199], [59, 1]], (k) => cells.push(k));
+  for (let n = 1; n < cells.length; n++) assert.ok(t.z[cells[n]] <= t.z[cells[n - 1]] + 1e-6, `remontée au pas ${n}`);
+  // chemin 4-connexe : deux mailles successives partagent un côté
+  for (let n = 1; n < cells.length; n++) {
+    const a = cells[n - 1];
+    const b = cells[n];
+    assert.ok(Math.abs(a - b) === 1 || Math.abs(a - b) === nx, 'maille reliée par un coin seulement');
+  }
 });
 
 console.log(failures ? `\n${failures} échec(s)` : '\nTous les tests passent.');

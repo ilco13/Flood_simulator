@@ -20,6 +20,7 @@ export const WMTS = 'https://data.geopf.fr/wmts';
 export const LAYERS = {
   dem: 'IGNF_LIDAR-HD_MNT_ELEVATION.ELEVATIONGRIDCOVERAGE.LAMB93', // MNT LiDAR HD (0,5 m)
   demFallback: 'RGEALTI-MNT_PYR-ZIP_FXX_LAMB93_WMS', // RGE ALTI 1 m
+  dsm: 'IGNF_LIDAR-HD_MNS_ELEVATION.ELEVATIONGRIDCOVERAGE.LAMB93', // MNS LiDAR HD (bâtiments, arbres)
   landcover: 'IGNF_COSIA_2024-2026', // Occupation du sol IA IGN (20 cm)
   // Millésime précédent : complète les zones pas encore couvertes (ex. partie varoise).
   landcoverFallback: ['IGNF_COSIA_2021-2023', 'IGNF_COSIA_2017-2020'],
@@ -36,6 +37,15 @@ export const ORTHO_TILES =
 export const SHADOW_TILES =
   `${WMTS}?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ELEVATION.ELEVATIONGRIDCOVERAGE.SHADOW` +
   '&STYLE=estompage_grayscale&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png';
+
+// Ombrages LiDAR HD : sol nu (MNT, le relief de la simulation) et surface (MNS : bâtiments, arbres).
+const lidarShade = (layer) =>
+  `${WMTS}?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=${layer}` +
+  '&STYLE=normal&TILEMATRIXSET=PM_0_18&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png';
+export const LIDAR_SHADE = {
+  mnt: lidarShade('IGNF_LIDAR-HD_MNT_ELEVATION.ELEVATIONGRIDCOVERAGE.SHADOW'),
+  mns: lidarShade('IGNF_LIDAR-HD_MNS_ELEVATION.ELEVATIONGRIDCOVERAGE.SHADOW'),
+};
 
 // Taille d'un bloc demandé au WMS (le service accepte jusqu'à 5010 px). Des blocs
 // moyens donnent un avancement plus régulier et plus de requêtes en parallèle.

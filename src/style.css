@@ -1197,3 +1197,48 @@ details.advanced h3 {
 [hidden] {
   display: none !important;
 }
+
+/* Choix du fond de carte (photo / ombrages LiDAR HD) */
+.basemap {
+  position: absolute;
+  right: 54px;
+  top: 10px;
+  z-index: 4;
+  display: flex;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.basemap button {
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.basemap button + button {
+  border-left: 1px solid var(--line);
+}
+.basemap button.on {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+@media (max-width: 760px) {
+  .basemap {
+    right: auto;
+    top: auto;
+    left: 8px;
+    bottom: 90px;
+  }
+  .basemap button {
+    padding: 6px 8px;
+    font-size: 12px;
+  }
+  #map-status {
+    bottom: 132px;
+  }
+}
