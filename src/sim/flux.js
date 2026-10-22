@@ -11,12 +11,14 @@ const BLOCKS = 240;
 const VSCALE = 0.005;
 
 /**
- * @returns {{ qm: Float32Array, vec: { B, bx, by, fx: Float32Array, fy: Float32Array } }}
- *   qm : débit unitaire par maille ; fx, fy : moyenne par bloc (fx vers l'est, fy vers le sud).
+ * @returns {{ qm: Float32Array, ang: Uint8Array, vec: { B, bx, by, fx: Float32Array, fy: Float32Array } }}
+ *   qm : débit unitaire par maille ; ang : direction par maille (1/256 de tour, depuis l'est
+ *   vers le sud) ; fx, fy : moyenne par bloc (fx vers l'est, fy vers le sud).
  */
 export function fluxFields(qx, qy, nx, ny) {
   const N = nx * ny;
   const qm = new Float32Array(N);
+  const ang = new Uint8Array(N);
   const B = Math.max(1, Math.ceil(Math.max(nx, ny) / BLOCKS));
   const bx = Math.ceil(nx / B);
   const by = Math.ceil(ny / B);
@@ -30,6 +32,7 @@ export function fluxFields(qx, qy, nx, ny) {
       const uy = 0.5 * (qy[j * nx + i] + qy[(j + 1) * nx + i]);
       const k = j * nx + i;
       qm[k] = Math.hypot(ux, uy);
+      if (qm[k] > MIN_FLOW) ang[k] = Math.round(((Math.atan2(uy, ux) / (2 * Math.PI) + 1) % 1) * 256) & 255;
       const b = bj + Math.floor(i / B);
       fx[b] += ux;
       fy[b] += uy;
@@ -41,7 +44,7 @@ export function fluxFields(qx, qy, nx, ny) {
       fx[b] /= cnt[b];
       fy[b] /= cnt[b];
     }
-  return { qm, vec: { B, bx, by, fx, fy } };
+  return { qm, ang, vec: { B, bx, by, fx, fy } };
 }
 
 export function quantizeFlow(qm) {

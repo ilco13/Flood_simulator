@@ -23,7 +23,7 @@ self.onmessage = async (e) => {
       onSnapshot: (t, h, flux) =>
         self.postMessage(
           { type: 'snapshot', t, h, flux },
-          flux ? [h.buffer, flux.qm.buffer, flux.vec.fx.buffer, flux.vec.fy.buffer] : [h.buffer],
+          flux ? [h.buffer, flux.qm.buffer, flux.ang.buffer, flux.vec.fx.buffer, flux.vec.fy.buffer] : [h.buffer],
         ),
       onProgress: async (p, info) => {
         self.postMessage({ type: 'progress', p, info });

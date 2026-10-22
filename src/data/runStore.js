@@ -73,6 +73,7 @@ export async function packRun({ name, params, grid, totalTime, tEnd, store, seri
     t: it.t,
     blob: toBlob(it.data),
     ...(it.fdata ? { fblob: toBlob(it.fdata), vblob: toBlob(it.vdata), vmeta: it.vmeta } : {}),
+    ...(it.adata ? { ablob: toBlob(it.adata) } : {}),
   }));
   const payload = {
     snaps,
@@ -92,7 +93,7 @@ export async function packRun({ name, params, grid, totalTime, tEnd, store, seri
     },
   };
   let size = payload.hmax.size + payload.tmax.size + payload.vmax.size + payload.dem.size + (payload.zsim?.size || 0);
-  for (const s of snaps) size += s.blob.size + (s.fblob?.size || 0) + (s.vblob?.size || 0);
+  for (const s of snaps) size += s.blob.size + (s.fblob?.size || 0) + (s.vblob?.size || 0) + (s.ablob?.size || 0);
   const meta = {
     id,
     name,
@@ -174,13 +175,13 @@ export async function exportRun(id) {
   ];
   // Débit (facultatif) : après les instantanés, deux blocs par instantané qui en a.
   const flow = payload.snaps.filter((s) => s.fblob);
-  const blobs = [...named.map((x) => x[1]), ...payload.snaps.map((s) => s.blob), ...flow.flatMap((s) => [s.fblob, s.vblob])];
+  const blobs = [...named.map((x) => x[1]), ...payload.snaps.map((s) => s.blob), ...flow.flatMap((s) => (s.ablob ? [s.fblob, s.vblob, s.ablob] : [s.fblob, s.vblob]))];
   const header = {
     meta,
     json: payload.json,
     parts: named.map((x) => x[0]),
     snapTimes: payload.snaps.map((s) => s.t),
-    snapFlow: payload.snaps.map((s) => (s.fblob ? s.vmeta : null)),
+    snapFlow: payload.snaps.map((s) => (s.fblob ? { ...s.vmeta, a: s.ablob ? 1 : 0 } : null)),
     sizes: blobs.map((b) => b.size),
   };
   const head = new TextEncoder().encode(JSON.stringify(header));
@@ -211,6 +212,7 @@ export async function importRun(file) {
     if (!vmeta) return {};
     const out = { fblob: blobs[fi], vblob: blobs[fi + 1], vmeta };
     fi += 2;
+    if (vmeta.a) out.ablob = blobs[fi++];
     return out;
   };
   const meta = { ...header.meta, id: `${Date.now().toString(36)}-imp`, imported: true };

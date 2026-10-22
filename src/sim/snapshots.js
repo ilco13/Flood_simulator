@@ -55,8 +55,9 @@ export class SnapshotStore {
       const pv = packVec(flux.vec);
       item.fdata = await compress(qf);
       item.vdata = await compress(new Uint8Array(pv.buffer));
-      item.vmeta = { B: flux.vec.B, bx: flux.vec.bx, by: flux.vec.by };
-      this.fcache.set(this.items.length, { qf, vec: unpackVec(pv, flux.vec.B, flux.vec.bx, flux.vec.by) });
+      item.adata = await compress(flux.ang);
+      item.vmeta = { B: flux.vec.B, bx: flux.vec.bx, by: flux.vec.by, a: 1 };
+      this.fcache.set(this.items.length, { qf, ang: flux.ang, vec: unpackVec(pv, flux.vec.B, flux.vec.bx, flux.vec.by) });
     }
     this.items.push(item);
     this.bytes += data.size ?? data.byteLength;
@@ -75,7 +76,8 @@ export class SnapshotStore {
     const qf = await decompress(it.fdata);
     const vb = await decompress(it.vdata);
     const vec = unpackVec(new Int16Array(vb.buffer, vb.byteOffset, vb.byteLength / 2), it.vmeta.B, it.vmeta.bx, it.vmeta.by);
-    const f = { qf, vec };
+    const ang = it.adata ? await decompress(it.adata) : null;
+    const f = { qf, ang, vec };
     this.fcache.set(i, f);
     this.#trim();
     return f;

@@ -991,7 +991,13 @@ function accumulateFlowMax(run, flow) {
     };
   }
   const m = run.flowMax;
-  for (let k = 0; k < flow.qf.length; k++) if (flow.qf[k] > m.qf[k]) m.qf[k] = flow.qf[k];
+  if (flow.ang && !m.ang) m.ang = new Uint8Array(flow.qf.length);
+  for (let k = 0; k < flow.qf.length; k++)
+    if (flow.qf[k] > m.qf[k]) {
+      m.qf[k] = flow.qf[k];
+      if (m.ang && flow.ang) m.ang[k] = flow.ang[k];
+    }
+  run.flowRef = null; // échelle des flèches à recalculer
   const { fx, fy } = flow.vec;
   for (let b = 0; b < fx.length; b++)
     if (fx[b] * fx[b] + fy[b] * fy[b] > m.vec.fx[b] * m.vec.fx[b] + m.vec.fy[b] * m.vec.fy[b]) {
@@ -1014,45 +1020,28 @@ async function flowMaxOf(run) {
 
 function addArrowLayer() {
   const map = state.map;
-  // Flèche pointant vers le haut (nord), blanche cernée de sombre : lisible sur photo et couleurs.
-  const S = 48;
-  const cv = document.createElement('canvas');
-  cv.width = S;
-  cv.height = S;
-  const c = cv.getContext('2d');
-  c.beginPath();
-  c.moveTo(S / 2, 3);
-  c.lineTo(S / 2 + 13, 22);
-  c.lineTo(S / 2 + 5, 22);
-  c.lineTo(S / 2 + 5, S - 3);
-  c.lineTo(S / 2 - 5, S - 3);
-  c.lineTo(S / 2 - 5, 22);
-  c.lineTo(S / 2 - 13, 22);
-  c.closePath();
-  c.fillStyle = '#ffffff';
-  c.strokeStyle = 'rgba(10,25,45,0.9)';
-  c.lineWidth = 3;
-  c.lineJoin = 'round';
-  c.stroke();
-  c.fill();
-  map.addImage('flow-arrow', c.getImageData(0, 0, S, S), { pixelRatio: 2 });
   map.addSource('flow-arrows', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  const before = map.getLayer('catchment-fill') ? 'catchment-fill' : undefined;
+  // Flèches fines : trait blanc cerné de sombre, lisible sur la photo comme sur les couleurs.
+  map.addLayer(
+    {
+      id: 'flow-arrows-casing',
+      type: 'line',
+      source: 'flow-arrows',
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': 'rgba(8, 22, 40, 0.7)', 'line-width': 3.2 },
+    },
+    before,
+  );
   map.addLayer(
     {
       id: 'flow-arrows',
-      type: 'symbol',
+      type: 'line',
       source: 'flow-arrows',
-      layout: {
-        'icon-image': 'flow-arrow',
-        'icon-rotate': ['get', 'rot'],
-        'icon-rotation-alignment': 'map',
-        'icon-size': ['get', 's'],
-        'icon-allow-overlap': true,
-        'icon-ignore-placement': true,
-      },
-      paint: { 'icon-opacity': 0.92 },
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': '#ffffff', 'line-width': 1.4 },
     },
-    map.getLayer('catchment-fill') ? 'catchment-fill' : undefined,
+    before,
   );
   let timer = null;
   map.on('moveend', () => {
@@ -1061,63 +1050,104 @@ function addArrowLayer() {
   });
 }
 
+const ARROW_SPACING = 22; // px entre deux flèches
+const ARROW_MIN_FLOW = 0.05; // m³/s par m de large : en dessous, pas de flèche (hors du lit)
+
+/** Débit de référence de la simulation (forts débits du maximum) : échelle fixe des longueurs. */
+function flowReference(run, flow) {
+  if (run.flowRef) return run.flowRef;
+  const src = run.flowMax?.qf || flow.qf;
+  const vals = [];
+  for (let k = 0; k < src.length; k++) if (src[k]) vals.push(src[k]);
+  vals.sort((a, b) => a - b);
+  const v = vals.length ? dequantizeFlow(vals[Math.floor(vals.length * 0.98)]) : 1;
+  run.flowRef = Math.max(0.2, v);
+  return run.flowRef;
+}
+
 /**
- * Flèches du débit : regroupées selon le zoom (une flèche tous les ~34 px), orientées dans le
- * sens du courant, longueur croissant avec le débit (racine carrée, relative au débit fort
- * de l'instant).
+ * Flèches du courant : une tous les ~22 px, posée sur la maille de plus fort débit de chaque
+ * case (donc dans le lit), orientée selon le courant de cette maille ; longueur de 5 à 26 px
+ * selon le débit (racine carrée, échelle fixe pour toute la simulation).
  */
 function renderArrows() {
   const map = state.map;
   const src = map?.getSource('flow-arrows');
   if (!src) return;
   const run = state.run;
-  const vec = state.lastFlow?.vec;
-  if (!state.arrows || !vec || !run?.grid) return src.setData({ type: 'FeatureCollection', features: [] });
+  const flow = state.lastFlow;
+  if (!state.arrows || !flow || !run?.grid) return src.setData({ type: 'FeatureCollection', features: [] });
   const g = run.grid;
+  const { nx, ny, dx } = g;
   const lat = map.getCenter().lat;
   const mpp = (156543.03 * Math.cos((lat * Math.PI) / 180)) / 2 ** map.getZoom();
-  const blockPx = (vec.B * g.dx) / mpp;
-  const s = Math.max(1, Math.ceil(34 / blockPx));
+  const w = Math.max(1, Math.round((ARROW_SPACING * mpp) / dx));
+  // Partie visible de la grille
   const b = map.getBounds();
-  const items = [];
-  for (let bj = 0; bj < vec.by; bj += s)
-    for (let bi = 0; bi < vec.bx; bi += s) {
-      let fx = 0;
-      let fy = 0;
-      let n = 0;
-      for (let dj = 0; dj < s && bj + dj < vec.by; dj++)
-        for (let di = 0; di < s && bi + di < vec.bx; di++) {
-          const k = (bj + dj) * vec.bx + bi + di;
-          fx += vec.fx[k];
-          fy += vec.fy[k];
-          n++;
+  const corners = [b.getSouthWest(), b.getNorthEast(), b.getNorthWest(), b.getSouthEast()].map((ll) => toL93(ll.lng, ll.lat));
+  const xs = corners.map((c) => c[0]);
+  const ys = corners.map((c) => c[1]);
+  const i0 = Math.max(0, Math.floor((Math.min(...xs) - g.xmin) / dx / w) * w);
+  const i1 = Math.min(nx, Math.ceil((Math.max(...xs) - g.xmin) / dx));
+  const j0 = Math.max(0, Math.floor((g.ymax - Math.max(...ys)) / dx / w) * w);
+  const j1 = Math.min(ny, Math.ceil((g.ymax - Math.min(...ys)) / dx));
+  const qmin = ARROW_MIN_FLOW;
+  const ref = flowReference(run, flow);
+  const vec = flow.vec;
+  const feats = [];
+  for (let wj = j0; wj < j1; wj += w)
+    for (let wi = i0; wi < i1; wi += w) {
+      let best = -1;
+      let bq = 0;
+      for (let j = wj; j < Math.min(wj + w, ny); j++)
+        for (let i = wi; i < Math.min(wi + w, nx); i++) {
+          const v = flow.qf[j * nx + i];
+          if (v > bq) {
+            bq = v;
+            best = j * nx + i;
+          }
         }
-      fx /= n;
-      fy /= n;
-      const m = Math.hypot(fx, fy);
-      if (m < 0.02) continue;
-      const cx = g.xmin + (bi + Math.min(s, vec.bx - bi) / 2) * vec.B * g.dx;
-      const cy = g.ymax - (bj + Math.min(s, vec.by - bj) / 2) * vec.B * g.dx;
-      const [lon, la] = toWgs(cx, cy);
-      if (lon < b.getWest() || lon > b.getEast() || la < b.getSouth() || la > b.getNorth()) continue;
-      items.push({ lon, la, fx, fy, m });
+      if (best < 0) continue;
+      const q = dequantizeFlow(bq);
+      if (q < qmin) continue;
+      const ci = best % nx;
+      const cj = (best - ci) / nx;
+      // Direction : celle de la maille (est, sud), sinon la moyenne de son bloc
+      let ux;
+      let uy;
+      if (flow.ang) {
+        const th = (flow.ang[best] / 256) * 2 * Math.PI;
+        ux = Math.cos(th);
+        uy = Math.sin(th);
+      } else {
+        const bk = Math.floor(cj / vec.B) * vec.bx + Math.floor(ci / vec.B);
+        const m = Math.hypot(vec.fx[bk], vec.fy[bk]) || 1;
+        ux = vec.fx[bk] / m;
+        uy = vec.fy[bk] / m;
+      }
+      const ex = ux; // vers l'est
+      const ey = -uy; // vers le nord
+      const Lpx = Math.min(26, 5 + 21 * Math.sqrt(Math.min(1, q / ref)));
+      const L = Lpx * mpp;
+      const hl = Math.min(5 * mpp, 0.4 * L);
+      const cx = g.xmin + (ci + 0.5) * dx;
+      const cy = g.ymax - (cj + 0.5) * dx;
+      const tail = [cx - (ex * L) / 2, cy - (ey * L) / 2];
+      const tip = [cx + (ex * L) / 2, cy + (ey * L) / 2];
+      const back = (a) => [tip[0] - hl * (ex * Math.cos(a) - ey * Math.sin(a)), tip[1] - hl * (ey * Math.cos(a) + ex * Math.sin(a))];
+      feats.push({
+        type: 'Feature',
+        geometry: {
+          type: 'MultiLineString',
+          coordinates: [
+            [toWgs(...tail), toWgs(...tip)],
+            [toWgs(...back(0.5)), toWgs(...tip), toWgs(...back(-0.5))],
+          ],
+        },
+        properties: {},
+      });
     }
-  const ms = items.map((x) => x.m).sort((a, b2) => a - b2);
-  const ref = Math.max(0.1, ms[Math.floor(ms.length * 0.95)] || 0.1);
-  // Convergence des méridiens (Lambert 93) : le nord de la grille diffère du nord vrai de ~2°.
-  const gamma = (lonv) => (lonv - 3) * Math.sin((46.5 * Math.PI) / 180);
-  src.setData({
-    type: 'FeatureCollection',
-    features: items.map(({ lon, la, fx, fy, m }) => ({
-      type: 'Feature',
-      geometry: { type: 'Point', coordinates: [lon, la] },
-      properties: {
-        // fx vers l'est, fy vers le sud
-        rot: (Math.atan2(fx, -fy) * 180) / Math.PI + gamma(lon),
-        s: Math.min(1.5, Math.max(0.35, 0.35 + 1.0 * Math.sqrt(m / ref))),
-      },
-    })),
-  });
+  src.setData({ type: 'FeatureCollection', features: feats });
 }
 
 let hydroTimer = null;
@@ -2528,7 +2558,7 @@ async function openSaved(id) {
     };
     showContext(state.data);
     const store = new SnapshotStore();
-    store.items = r.snaps.map((s) => ({ t: s.t, data: s.blob, fdata: s.fblob, vdata: s.vblob, vmeta: s.vmeta }));
+    store.items = r.snaps.map((s) => ({ t: s.t, data: s.blob, fdata: s.fblob, vdata: s.vblob, adata: s.ablob, vmeta: s.vmeta }));
     const run = {
       running: false,
       stop: false,
