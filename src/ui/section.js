@@ -194,9 +194,12 @@ export function drawSection(canvas, s) {
   const ground = new Float32Array(n);
   for (let i = 0; i < n; i++) ground[i] = (s.fine && Number.isFinite(s.fine[i]) ? s.fine[i] : pts[i].zi) + (s.raise?.[i] || 0);
   // Niveaux d'eau (surface libre) à l'instant et maximum, tirés de la simulation
-  const level = poolLevels(pts, ground, (p) => p.h, 0.05);
-  // Le niveau max n'est tracé que là où l'eau a dépassé 10 cm (pas la lame de ruissellement).
-  const levelMax = poolLevels(pts, ground, (p) => p.hmax, 0.1);
+  // Même seuil pour les deux (10 cm) : la lame de ruissellement sur les versants n'est pas tracée.
+  const level = poolLevels(pts, ground, (p) => p.h, 0.1, s.cell);
+  // Maximum (connu en fin de calcul) : jamais sous l'eau de l'instant affiché.
+  const hasMax = pts.some((p) => p.hmax > 0);
+  const levelMax = hasMax ? poolLevels(pts, ground, (p) => Math.max(p.hmax, p.h), 0.1, s.cell) : new Float32Array(n).fill(NaN);
+  if (hasMax) for (let i = 0; i < n; i++) if (Number.isFinite(level[i]) && !(levelMax[i] >= level[i])) levelMax[i] = level[i];
 
   let zmin = Infinity;
   let zmax = -Infinity;
@@ -452,42 +455,41 @@ export function drawSection(canvas, s) {
  * lui : l'eau remplit le fond du lit et passe par-dessus une berge plus basse que la surface,
  * sans jamais « tenir debout » au-dessus d'une berge.
  */
-function poolLevels(pts, ground, depthOf, thr) {
+/**
+ * Surface libre le long de la coupe. Dans chaque tronçon mouillé (hauteur > thr), le niveau
+ * en un point est la moyenne pondérée par la hauteur des cotes d'eau (zc + h) des mailles
+ * voisines (± 1,5 maille) : surface lisse sur le terrain LiDAR fin, mais qui suit la pente
+ * de l'écoulement au lieu d'être aplatie à la moyenne de tout le tronçon.
+ */
+function poolLevels(pts, ground, depthOf, thr, cell) {
   const n = pts.length;
   const out = new Float32Array(n).fill(NaN);
+  const step = n > 1 ? pts[1].d - pts[0].d : 1;
+  const half = Math.max(1, Math.round((1.5 * (cell || step)) / (step || 1)));
+  const wet = (k) => depthOf(pts[k]) > thr && Number.isFinite(pts[k].zc);
   let i = 0;
   while (i < n) {
-    if (!(depthOf(pts[i]) > thr) || !Number.isFinite(pts[i].zc)) {
+    if (!wet(i)) {
       i++;
       continue;
     }
     let j = i;
-    let sw = 0;
-    let swl = 0;
-    while (j < n && depthOf(pts[j]) > thr && Number.isFinite(pts[j].zc)) {
-      const h = depthOf(pts[j]);
-      sw += h;
-      swl += h * (pts[j].zc + h);
-      j++;
-    }
-    const L = swl / sw;
-    // Point de départ : le terrain fin le plus bas de la poche (s'il est sous le niveau).
-    let k0 = i;
-    for (let k = i; k < j; k++) if (ground[k] < ground[k0]) k0 = k;
-    if (ground[k0] < L) {
-      for (const dir of [1, -1]) {
-        for (let k = k0; k >= 0 && k < n && ground[k] < L; k += dir) {
-          if (!(out[k] >= L)) out[k] = L;
-        }
+    while (j < n && wet(j)) j++;
+    const lv = new Float64Array(j - i);
+    for (let k = i; k < j; k++) {
+      let sw = 0;
+      let swl = 0;
+      for (let m = Math.max(i, k - half); m <= Math.min(j - 1, k + half); m++) {
+        const h = depthOf(pts[m]);
+        sw += h;
+        swl += h * (pts[m].zc + h);
       }
-      // Autres creux de la poche séparés par une bosse émergée (îlot) : remplis aussi.
-      for (let k = i; k < j; k++) {
-        if (Number.isFinite(out[k]) || !(ground[k] < L)) continue;
-        for (const dir of [1, -1]) {
-          for (let m = k; m >= 0 && m < n && ground[m] < L; m += dir) if (!(out[m] >= L)) out[m] = L;
-        }
-      }
+      lv[k - i] = swl / sw;
+      if (ground[k] < lv[k - i]) out[k] = lv[k - i];
     }
+    // Bords du tronçon : l'eau s'étend sur le terrain fin tant qu'il reste sous le niveau.
+    for (let k = i - 1; k >= 0 && ground[k] < lv[0]; k--) if (!(out[k] >= lv[0])) out[k] = lv[0];
+    for (let k = j; k < n && ground[k] < lv[j - i - 1]; k++) if (!(out[k] >= lv[j - i - 1])) out[k] = lv[j - i - 1];
     i = j;
   }
   return out;
