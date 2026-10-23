@@ -2,7 +2,7 @@
 
 import { burnRivers, riverDirectionAt, rasterizeLine } from '../data/rivers.js';
 import { drainageLabels, basinMask, accumulation, upstreamMask, flowDirections } from '../hydrology/terrain.js';
-import { buildRunoffFields } from '../hydrology/scs.js';
+import { buildRunoffFields, hortonM0 } from '../hydrology/scs.js';
 import { cellOf } from '../geo.js';
 
 /**
@@ -247,14 +247,15 @@ export function regroupSamples(sub, grid, f) {
 }
 
 /** Champs dépendant du scénario (sol, humidité). */
-export function buildModel({ grid, terrain, classes, spc = 1, soilGroup, amc, rainOnBasinOnly, cnFactor }) {
-  const { S, manning } = buildRunoffFields(
+export function buildModel({ grid, terrain, classes, spc = 1, soilGroup, amc, rainOnBasinOnly, cnFactor, capInfiltration = true }) {
+  const { S, manning, fc } = buildRunoffFields(
     classes,
     rainOnBasinOnly ? terrain.mask : null,
     soilGroup,
     amc,
     cnFactor,
     spc,
+    capInfiltration,
   );
-  return { nx: grid.nx, ny: grid.ny, dx: grid.dx, z: terrain.z, S, manning };
+  return { nx: grid.nx, ny: grid.ny, dx: grid.dx, z: terrain.z, S, manning, fc, m0: hortonM0(amc) };
 }

@@ -148,6 +148,8 @@ export function analyseComparison(scs, { areaKm2 }) {
     const hi = sorted[sorted.length - 1];
     const r = ratio(hi.m.qPeak, lo.m.qPeak);
     let t = 'Seul l\'état du sol change. Sur sol sec, les premiers millimètres s\'infiltrent ; sur sol saturé, presque toute la pluie ruisselle dès le début. ';
+    if (scs.some((s) => s.p.capInf))
+      t += 'Mais un sol, même sec, n\'absorbe qu\'un certain débit : quand la pluie tombe plus vite, l\'excédent ruisselle quel que soit l\'état du sol, ce qui réduit l\'écart sous les orages violents. ';
     if (scs.every((s) => s.m.share != null))
       t += `Part de la pluie passée au droit du lieu : ${sorted.map((s) => `${AMC_NAME[s.p.amc]} ${nf(Math.min(1, s.m.share) * 100)} %`).join(', ')}. `;
     if (r >= 2)

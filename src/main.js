@@ -4,7 +4,7 @@ import { makeGrid, toL93, toWgs, cellOf, gridCornersWgs } from './geo.js';
 import { createMap, setWaterCanvas, refreshWater, setGeoJson } from './map.js';
 import { SHAPES, makeHyetograph } from './hydrology/rain.js';
 import { buildModel } from './sim/model.js';
-import { meanRunoff, runoffMm } from './hydrology/scs.js';
+import { meanRunoff, meanRunoffHyeto, runoffMm } from './hydrology/scs.js';
 import { simulate } from './sim/driver.js';
 import { getGpuDevice, gpuMaxCells, GpuSolver } from './sim/gpuSolver.js';
 import { SnapshotStore, quantize, dequantize } from './sim/snapshots.js';
@@ -80,6 +80,7 @@ function params() {
     tailH: Math.max(0, Number($('tail-h').value) || 0),
     burn: Math.max(0, Number($('burn').value) || 0),
     cnFactor: Math.max(0.1, Number($('cnf').value) || 1),
+    capInf: $('cap-inf').checked,
     engine: $('engine').value,
   };
 }
@@ -247,9 +248,12 @@ function updateRainInfo() {
       amc: p.amc,
       rainOnBasinOnly: true,
       cnFactor: p.cnFactor,
+      capInfiltration: p.capInf,
     });
-    const q = meanRunoff(model.S, p.rainMm);
-    extra = ` Ruissellement moyen attendu sur la zone : <strong>${fmtNum(q)} mm</strong> (${fmtNum((q / Math.max(p.rainMm, 1e-9)) * 100)} % de la pluie).`;
+    const q0 = meanRunoff(model.S, p.rainMm);
+    const q = p.capInf ? meanRunoffHyeto(model.S, model.fc, model.m0, h, p.rainH * 3600) : q0;
+    extra = ` Ruissellement moyen attendu sur la zone : <strong>${fmtNum(q)} mm</strong> (${fmtNum((q / Math.max(p.rainMm, 1e-9)) * 100)} % de la pluie)`;
+    extra += q - q0 >= 1 ? `, dont ${fmtNum(q - q0)} mm parce que la pluie tombe plus vite que le sol n'absorbe.` : '.';
   } else {
     const S = 25400 / 80 - 254;
     extra = ` Pour un sol type (CN 80), environ ${fmtNum(runoffMm(p.rainMm, S))} mm ruissellent.`;
@@ -328,7 +332,7 @@ function setupUi() {
   setupColors();
   $('soil').addEventListener('input', renderSoilInfo);
 
-  for (const id of ['rain-mm', 'rain-h', 'rain-shape', 'soil', 'cnf']) $(id).addEventListener('input', updateRainInfo);
+  for (const id of ['rain-mm', 'rain-h', 'rain-shape', 'soil', 'cnf', 'cap-inf']) $(id).addEventListener('input', updateRainInfo);
   for (const id of ['rain-h', 'tail-h', 'res', 'engine']) $(id).addEventListener('input', describeRes);
 
   $('run').onclick = () => (state.run?.running ? stopRun() : startRun());
@@ -745,6 +749,7 @@ async function startRun() {
       amc: p.amc,
       rainOnBasinOnly: !!data.mask,
       cnFactor: p.cnFactor,
+      capInfiltration: p.capInf,
     });
     run.gauges = data.gauges;
     run.series = data.gauges.map(() => [[0, 0]]);
@@ -2880,7 +2885,7 @@ async function collectScenario(run, sc, i, mainG) {
   return {
     label: sc.label,
     color: CMP_COLORS[i],
-    p: { rainMm: run.params.rainMm, rainH: run.params.rainH, amc: run.params.amc },
+    p: { rainMm: run.params.rainMm, rainH: run.params.rainH, amc: run.params.amc, capInf: !!run.params.capInf },
     m,
     id,
     saved: !!run.savedId,

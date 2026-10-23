@@ -5,7 +5,7 @@
 //  qy[j*nx+i]     : face entre la maille (i, j-1) et (i, j). Positif vers le sud (j croissant).
 
 import { G, H_MIN, FROUDE_MAX, V_MAX, BOUNDARY_SLOPE, THETA } from './scheme.js';
-import { IA_RATIO } from '../hydrology/scs.js';
+import { IA_RATIO, HORTON_P } from '../hydrology/scs.js';
 
 // q : débit de la face au pas précédent ; qm, qp : faces voisines dans la même direction
 // (pondération θ de de Almeida et al. 2012, qui amortit les oscillations).
@@ -34,12 +34,14 @@ export class CpuSolver {
   /**
    * @param {object} p  { nx, ny, dx, z, S, manning }
    */
-  constructor({ nx, ny, dx, z, S, manning }) {
+  constructor({ nx, ny, dx, z, S, manning, fc = null, m0 = 3 }) {
     this.nx = nx;
     this.ny = ny;
     this.dx = dx;
     this.z = z;
     this.S = S;
+    this.fc = fc; // capacité d'infiltration finale (m/s) ; null = pas de plafond
+    this.m0 = m0;
     this.n = manning;
     const N = nx * ny;
     this.h = new Float32Array(N);
@@ -132,6 +134,9 @@ export class CpuSolver {
 
     // 4) Continuité + pluie nette (SCS-CN)
     const c = dt / dx;
+    const fc = this.fc;
+    // Infiltration possible pendant ce pas, par m/s de capacité finale (loi de Horton)
+    const capDt = fc && rainDepth > 0 ? dt * (1 + (this.m0 - 1) * Math.exp(-cumP / HORTON_P)) : 0;
     let hm = 0;
     let rain = 0;
     for (let j = 0; j < ny; j++) {
@@ -143,8 +148,10 @@ export class CpuSolver {
         const s = S[k];
         if (rainDepth > 0 && s >= 0) {
           const x = cumP - IA_RATIO * s;
-          if (x > 0) {
-            const r = rainDepth * (1 - (s * s) / ((x + s) * (x + s)));
+          let r = x > 0 ? rainDepth * (1 - (s * s) / ((x + s) * (x + s))) : 0;
+          // Pluie plus intense que ce que le sol peut absorber : l'excédent ruisselle.
+          if (fc) r = Math.max(r, rainDepth - fc[k] * capDt);
+          if (r > 0) {
             hn += r;
             rain += r;
           }

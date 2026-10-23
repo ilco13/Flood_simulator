@@ -1,7 +1,7 @@
 // Tests numériques du modèle (node test/run-tests.mjs).
 import assert from 'node:assert/strict';
 import { makeHyetograph } from '../src/hydrology/rain.js';
-import { runoffMm, runoffRate, retentionMm, adjustCn } from '../src/hydrology/scs.js';
+import { runoffMm, runoffRate, retentionMm, adjustCn, meanRunoffHyeto } from '../src/hydrology/scs.js';
 import { CpuBackend, simulate } from '../src/sim/driver.js';
 import { CpuSolver } from '../src/sim/cpuSolver.js';
 import { buildGauges, prepareTerrain } from '../src/sim/model.js';
@@ -253,6 +253,30 @@ await test('pont en remblai dans le MNT : lit creusé en pente continue vers l\'
     const b = cells[n];
     assert.ok(Math.abs(a - b) === 1 || Math.abs(a - b) === nx, 'maille reliée par un coin seulement');
   }
+});
+
+await test("plafond d'infiltration : un orage intense ruisselle même sur un sol qui pourrait tout stocker", async () => {
+  // Cuvette fermée (pas de sortie) : le volume d'eau en surface = ruissellement produit.
+  const nx = 12, ny = 12, dx = 10, N = nx * ny;
+  const z = new Float32Array(N).fill(100);
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) if (i === 0 || j === 0 || i === nx - 1 || j === ny - 1) z[j * nx + i] = 200;
+  const S = new Float32Array(N).fill(150); // Ia = 30 mm : 30 mm de pluie ne ruisselleraient pas du tout
+  const manning = new Float32Array(N).fill(0.05);
+  const hy = makeHyetograph({ totalMm: 30, durationH: 0.5, shape: 'uniform' }); // 60 mm/h
+  const run = async (fc) => {
+    const b = new CpuBackend({ nx, ny, dx, z, S, manning, fc, m0: 3 }, []);
+    await simulate(b, { hyeto: hy, totalTime: 1800, gaugeEvery: 300, snapshotEvery: 1800 });
+    const h = await b.readDepth();
+    let v = 0;
+    for (let k = 0; k < N; k++) v += h[k];
+    return (v / N) * 1000; // mm
+  };
+  assert.ok((await run(null)) < 0.01, 'SCS seule : pas de ruissellement');
+  const q = await run(new Float32Array(N).fill(8 / 3.6e6)); // 8 mm/h, capacité initiale 24 mm/h
+  assert.ok(q > 10 && q < 30, `ruissellement par excès d'intensité : ${q.toFixed(1)} mm`);
+  // Diagnostic du panneau : même ordre de grandeur que la simulation
+  const d = meanRunoffHyeto(S, new Float32Array(N).fill(8 / 3.6e6), 3, hy, 1800);
+  assert.ok(Math.abs(d - q) < 0.15 * q + 0.5, `diagnostic ${d.toFixed(1)} vs ${q.toFixed(1)}`);
 });
 
 await test('comparaison : indicateurs, analyse et carte des écarts', () => {

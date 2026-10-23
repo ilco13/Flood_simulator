@@ -3,7 +3,7 @@
 // un tampon uniforme adressé par décalage dynamique, ce qui évite un aller-retour CPU par pas.
 
 import { G, H_MIN, FROUDE_MAX, V_MAX, BOUNDARY_SLOPE, THETA, stableDt } from './scheme.js';
-import { IA_RATIO } from '../hydrology/scs.js';
+import { IA_RATIO, HORTON_P, NO_CAP } from '../hydrology/scs.js';
 import { fluxFields } from './flux.js';
 
 const WG = 16;
@@ -141,7 +141,7 @@ const DEPTH_WGSL = /* wgsl */ `${COMMON}
 @group(0) @binding(2) var<storage, read_write> h: array<f32>;
 @group(0) @binding(3) var<storage, read> qx: array<f32>;
 @group(0) @binding(4) var<storage, read> qy: array<f32>;
-@group(0) @binding(5) var<storage, read> S: array<f32>;
+@group(0) @binding(5) var<storage, read> S: array<vec2<f32>>; // (rétention SCS, capacité d'infiltration finale)
 @group(0) @binding(6) var<storage, read_write> hmaxC: array<f32>;
 @group(0) @binding(7) var<storage, read_write> tmaxC: array<f32>;
 @group(0) @binding(8) var<storage, read_write> vmaxC: array<f32>;
@@ -160,12 +160,18 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>,
     let fx = j * (nx + 1u) + i;
     let fy = j * nx + i;
     var hn = h[k] + P.dt / C.dx * (qx[fx] - qx[fx + 1u] + qy[fy] - qy[fy + nx]);
-    let s = S[k];
+    let sf = S[k];
+    let s = sf.x;
     if (P.rain > 0.0 && s >= 0.0) {
       let x = P.cumP - C.ia * s;
+      var r = 0.0;
       if (x > 0.0) {
-        hn = hn + P.rain * (1.0 - (s * s) / ((x + s) * (x + s)));
+        r = P.rain * (1.0 - (s * s) / ((x + s) * (x + s)));
       }
+      // Plafond d'infiltration (Horton) : l'excédent de pluie ruisselle (C.p0 = m0, C.p1 = P*)
+      let cap = sf.y * P.dt * (1.0 + (C.p0 - 1.0) * exp(-P.cumP / C.p1));
+      r = max(r, P.rain - cap);
+      hn = hn + r;
     }
     hn = max(hn, 0.0);
     h[k] = hn;
@@ -236,7 +242,7 @@ export function gpuMaxCells(device) {
 }
 
 export class GpuSolver {
-  constructor(device, { nx, ny, dx, z, S, manning }, gauges) {
+  constructor(device, { nx, ny, dx, z, S, manning, fc = null, m0 = 3 }, gauges) {
     this.device = device;
     // Taille des lots de pas envoyés au GPU, ajustée pour qu'un lot dure ~40 ms (≈ 12 ms quand
     // l'utilisateur déplace la carte) : la carte garde la main pour s'afficher.
@@ -266,7 +272,7 @@ export class GpuSolver {
       qy: [mk(nx * (ny + 1) * 4), mk(nx * (ny + 1) * 4)],
       ratio: mk(N * 4),
       n: mk(N * 4),
-      S: mk(N * 4),
+      S: mk(N * 8),
       hmax: mk(N * 4),
       tmax: mk(N * 4),
       vmax: mk(N * 4),
@@ -287,10 +293,17 @@ export class GpuSolver {
     f[7] = THETA;
     f[8] = BOUNDARY_SLOPE;
     f[9] = IA_RATIO;
+    f[10] = m0;
+    f[11] = HORTON_P;
     q.writeBuffer(this.bufs.consts, 0, cb);
     q.writeBuffer(this.bufs.z, 0, z);
     q.writeBuffer(this.bufs.n, 0, manning);
-    q.writeBuffer(this.bufs.S, 0, S);
+    const sfc = new Float32Array(2 * N);
+    for (let k = 0; k < N; k++) {
+      sfc[2 * k] = S[k];
+      sfc[2 * k + 1] = fc ? fc[k] : NO_CAP;
+    }
+    q.writeBuffer(this.bufs.S, 0, sfc);
 
     // Sections de contrôle
     const cells = [];

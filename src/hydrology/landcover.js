@@ -3,26 +3,28 @@
 // CN : Curve Number SCS pour les groupes hydrologiques de sol A, B, C, D (conditions
 // moyennes, AMC II), d'après les tables USDA TR-55 (classes les plus proches).
 // n : coefficient de Manning (s/m^(1/3)) pour l'écoulement en nappe à 5-25 m de maille.
+// fc : multiplicateur de la capacité d'infiltration du sol (racines et litière des forêts : plus ;
+//      croûte de battance des sols cultivés ou nus : moins ; surfaces étanches : 0).
 
 export const CLASSES = [
   // id, nom, couleur légende COSIA, CN [A,B,C,D], n
-  { name: 'Bâtiment', rgb: [206, 112, 121], cn: [98, 98, 98, 98], n: 0.1 },
-  { name: 'Zone imperméable', rgb: [166, 170, 183], cn: [98, 98, 98, 98], n: 0.015 },
-  { name: 'Zone perméable', rgb: [152, 119, 82], cn: [76, 85, 89, 91], n: 0.03 },
-  { name: 'Piscine', rgb: [98, 208, 255], cn: [98, 98, 98, 98], n: 0.015 },
-  { name: 'Serre', rgb: [61, 230, 235], cn: [98, 98, 98, 98], n: 0.02 },
-  { name: 'Sol nu', rgb: [187, 176, 150], cn: [77, 86, 91, 94], n: 0.03 },
-  { name: "Surface d'eau", rgb: [51, 117, 161], cn: [99, 99, 99, 99], n: 0.03 },
-  { name: 'Neige', rgb: [233, 239, 254], cn: [98, 98, 98, 98], n: 0.02 },
-  { name: 'Conifère', rgb: [18, 100, 33], cn: [30, 55, 70, 77], n: 0.12 },
-  { name: 'Feuillu', rgb: [76, 145, 41], cn: [30, 55, 70, 77], n: 0.12 },
-  { name: 'Coupe', rgb: [228, 142, 77], cn: [45, 66, 77, 83], n: 0.06 },
-  { name: 'Broussaille', rgb: [181, 195, 53], cn: [35, 56, 70, 77], n: 0.08 },
-  { name: 'Pelouse', rgb: [140, 215, 106], cn: [39, 61, 74, 80], n: 0.035 },
-  { name: 'Culture', rgb: [222, 207, 85], cn: [67, 78, 85, 89], n: 0.04 },
-  { name: 'Terre labourée', rgb: [208, 163, 73], cn: [72, 81, 88, 91], n: 0.035 },
-  { name: 'Vigne', rgb: [176, 130, 144], cn: [62, 74, 82, 87], n: 0.045 },
-  { name: 'Autre', rgb: [34, 34, 34], cn: [70, 80, 86, 90], n: 0.04 },
+  { name: 'Bâtiment', rgb: [206, 112, 121], cn: [98, 98, 98, 98], n: 0.1, fc: 0 },
+  { name: 'Zone imperméable', rgb: [166, 170, 183], cn: [98, 98, 98, 98], n: 0.015, fc: 0 },
+  { name: 'Zone perméable', rgb: [152, 119, 82], cn: [76, 85, 89, 91], n: 0.03, fc: 1.5 },
+  { name: 'Piscine', rgb: [98, 208, 255], cn: [98, 98, 98, 98], n: 0.015, fc: 0 },
+  { name: 'Serre', rgb: [61, 230, 235], cn: [98, 98, 98, 98], n: 0.02, fc: 0 },
+  { name: 'Sol nu', rgb: [187, 176, 150], cn: [77, 86, 91, 94], n: 0.03, fc: 0.6 },
+  { name: "Surface d'eau", rgb: [51, 117, 161], cn: [99, 99, 99, 99], n: 0.03, fc: 0 },
+  { name: 'Neige', rgb: [233, 239, 254], cn: [98, 98, 98, 98], n: 0.02, fc: 0.5 },
+  { name: 'Conifère', rgb: [18, 100, 33], cn: [30, 55, 70, 77], n: 0.12, fc: 5 },
+  { name: 'Feuillu', rgb: [76, 145, 41], cn: [30, 55, 70, 77], n: 0.12, fc: 5 },
+  { name: 'Coupe', rgb: [228, 142, 77], cn: [45, 66, 77, 83], n: 0.06, fc: 2 },
+  { name: 'Broussaille', rgb: [181, 195, 53], cn: [35, 56, 70, 77], n: 0.08, fc: 4 },
+  { name: 'Pelouse', rgb: [140, 215, 106], cn: [39, 61, 74, 80], n: 0.035, fc: 2.5 },
+  { name: 'Culture', rgb: [222, 207, 85], cn: [67, 78, 85, 89], n: 0.04, fc: 1 },
+  { name: 'Terre labourée', rgb: [208, 163, 73], cn: [72, 81, 88, 91], n: 0.035, fc: 0.8 },
+  { name: 'Vigne', rgb: [176, 130, 144], cn: [62, 74, 82, 87], n: 0.045, fc: 0.7 },
+  { name: 'Autre', rgb: [34, 34, 34], cn: [70, 80, 86, 90], n: 0.04, fc: 1.5 },
 ];
 
 export const OTHER = CLASSES.length - 1;

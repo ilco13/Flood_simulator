@@ -17,21 +17,22 @@ const { chromium } = require(process.env.PLAYWRIGHT || 'playwright');
     if (!gpu) return { error: 'pas de GPU' };
     // Vallée en V inclinée avec une cuvette, sol hétérogène
     const nx = 96, ny = 64, dx = 10, N = nx * ny;
-    const z = new Float32Array(N), S = new Float32Array(N), n = new Float32Array(N);
+    const z = new Float32Array(N), S = new Float32Array(N), n = new Float32Array(N), fcap = new Float32Array(N);
     for (let j = 0; j < ny; j++)
       for (let i = 0; i < nx; i++) {
         const k = j * nx + i;
         z[k] = 200 - 0.01 * i * dx + 0.08 * Math.abs(j - 32) * dx - 3 * Math.exp(-((i - 60) ** 2 + (j - 32) ** 2) / 30);
         S[k] = (i + j) % 7 === 0 ? 20 : 60;
         n[k] = j % 2 ? 0.04 : 0.08;
+        fcap[k] = ((i % 3) + 1) * 4 / 3.6e6; // plafond d'infiltration 4 à 12 mm/h
       }
     const gauges = [{ cells: Int32Array.from({ length: 20 }, (_, m) => (22 + m) * nx + 80), wx: new Float32Array(20).fill(dx), wy: new Float32Array(20) }];
     const hyeto = makeHyetograph({ totalMm: 80, durationH: 1, shape: 'desbordes' });
     const opts = { hyeto, totalTime: 2 * 3600, gaugeEvery: 300, snapshotEvery: 3600 };
     const qc = [], qg = [];
-    const cpu = new CpuBackend({ nx, ny, dx, z, S, manning: n }, gauges);
+    const cpu = new CpuBackend({ nx, ny, dx, z, S, manning: n, fc: fcap, m0: 3 }, gauges);
     const rc = await simulate(cpu, { ...opts, onGauge: (t, Q) => qc.push(Q[0]) });
-    const g = new GpuSolver(gpu.device, { nx, ny, dx, z, S, manning: n }, gauges);
+    const g = new GpuSolver(gpu.device, { nx, ny, dx, z, S, manning: n, fc: fcap, m0: 3 }, gauges);
     const rg = await simulate(g, { ...opts, onGauge: (t, Q) => qg.push(Q[0]) });
     const hc = await cpu.readDepth(), hg = await g.readDepth();
     let dmax = 0, hmaxc = 0;
