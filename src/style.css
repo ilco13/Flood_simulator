@@ -1290,3 +1290,192 @@ details.advanced h3 {
     bottom: 166px;
   }
 }
+
+/* Comparaison de scénarios */
+.compare-box {
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+.compare-box > summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13.5px;
+}
+.btn-row.wrap {
+  flex-wrap: wrap;
+}
+.cmp-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cmp-list li {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+.cmp-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cmp-top .cmp-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+}
+.cmp-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.2fr;
+  gap: 6px;
+  margin-top: 4px;
+}
+.cmp-row label {
+  margin: 0;
+  font-size: 11.5px;
+}
+.cmp-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
+  margin-right: 4px;
+  vertical-align: -1px;
+}
+#cmp-show {
+  margin-top: 6px;
+  width: 100%;
+}
+#compare-dock {
+  position: absolute;
+  top: 10px;
+  left: 392px;
+  width: 470px;
+  max-width: calc(100% - 480px);
+  max-height: calc(100% - 20px);
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 8px 10px;
+}
+#results-dock[hidden] ~ #compare-dock {
+  left: 10px;
+  max-width: calc(100% - 80px);
+}
+.cdock-body {
+  overflow-y: auto;
+  margin-top: 6px;
+  padding-right: 2px;
+  overscroll-behavior: contain;
+}
+.cdock-body h3 {
+  margin: 10px 0 2px;
+}
+#compare-dock.min .cdock-body {
+  display: none;
+}
+.legend.static span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 10px;
+  font-size: 12.5px;
+}
+.legend.static i {
+  width: 14px;
+  height: 4px;
+  border-radius: 2px;
+}
+.cmp-table-wrap {
+  overflow-x: auto;
+  margin-top: 10px;
+}
+.cmp-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.cmp-table th,
+.cmp-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 4px 6px;
+  text-align: left;
+  vertical-align: top;
+}
+.cmp-table tbody th {
+  font-weight: 500;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.cmp-table thead th i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 4px;
+}
+.cmp-table small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+}
+.cmp-table td.worst {
+  background: color-mix(in srgb, #e03131 14%, transparent);
+  font-weight: 600;
+}
+.cmp-analysis {
+  font-size: 13px;
+  line-height: 1.45;
+}
+.cmp-par {
+  margin: 0 0 8px;
+}
+.cmp-par ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+.cmp-par small {
+  color: var(--muted);
+}
+.cmp-diff-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: flex-end;
+  margin-top: 8px;
+}
+.cmp-diff-row label {
+  margin: 0;
+  font-size: 12px;
+}
+@media (max-width: 1100px) {
+  #compare-dock {
+    left: auto;
+    right: 10px;
+    max-width: calc(100% - 20px);
+  }
+}
+@media (max-width: 760px) {
+  #compare-dock,
+  #results-dock[hidden] ~ #compare-dock {
+    top: 8px;
+    left: 8px;
+    right: 8px;
+    width: auto;
+    max-width: none;
+    max-height: 62%;
+    z-index: 7;
+    padding: 6px 8px;
+  }
+}

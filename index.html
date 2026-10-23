@@ -110,6 +110,19 @@
                 <li data-step="sim"><i></i>Simulation de la crue<span></span></li>
               </ul>
             </div>
+            <details id="compare-box" class="compare-box">
+              <summary>Comparer plusieurs scénarios</summary>
+              <p class="hint">Même lieu, même maille : seules la pluie et l'humidité du sol changent. Les simulations sont lancées l'une après l'autre, puis comparées (courbes, tableau, analyse, carte des écarts).</p>
+              <div class="btn-row wrap">
+                <button type="button" class="chip-btn" id="cmp-soil">Sol sec / normal / saturé</button>
+                <button type="button" class="chip-btn" id="cmp-rain">Orage 3 h / pluie 24 h</button>
+                <button type="button" class="chip-btn" id="cmp-add">+ Réglage actuel</button>
+              </div>
+              <ol id="cmp-list" class="cmp-list"></ol>
+              <p id="cmp-info" class="hint"></p>
+              <button id="cmp-run" class="primary" type="button" disabled>Lancer la comparaison</button>
+              <button id="cmp-show" class="ghost" type="button" hidden>Revoir la dernière comparaison</button>
+            </details>
           </section>
 
           <section id="saved">
@@ -237,6 +250,34 @@
               <summary>Bilan du calcul</summary>
               <p id="summary" class="hint"></p>
             </details>
+          </div>
+        </div>
+        <div id="compare-dock" hidden>
+          <div class="dock-head">
+            <strong class="dock-title">Comparaison des scénarios</strong>
+            <span id="cmp-status" class="dock-time"></span>
+            <span class="dock-spacer"></span>
+            <button id="cmp-min" class="icon-ghost" type="button" title="Réduire / agrandir">▾</button>
+            <button id="cmp-close" class="icon-ghost" type="button" title="Fermer">✕</button>
+          </div>
+          <div class="cdock-body">
+            <div id="cmp-legend" class="legend gauges static"></div>
+            <h3 id="cmp-hydro-title">Débit (m³/s)</h3>
+            <canvas id="cmp-hydro" class="chart" aria-label="Hydrogrammes comparés"></canvas>
+            <h3>Hauteur d'eau au point étudié (m)</h3>
+            <canvas id="cmp-place" class="chart small" aria-label="Hauteur d'eau comparée au point étudié"></canvas>
+            <p id="cmp-place-note" class="hint"></p>
+            <div class="cmp-table-wrap"><table id="cmp-table" class="cmp-table"></table></div>
+            <h3>Analyse</h3>
+            <div id="cmp-analysis" class="cmp-analysis"></div>
+            <h3>Sur la carte</h3>
+            <div id="cmp-open" class="btn-row wrap"></div>
+            <div class="cmp-diff-row">
+              <label>Écarts de hauteur max : <select id="cmp-b"></select></label>
+              <label>par rapport à <select id="cmp-a"></select></label>
+              <button id="cmp-diff" class="ghost" type="button">Afficher les écarts</button>
+            </div>
+            <p id="cmp-diff-info" class="hint"></p>
           </div>
         </div>
         <div id="section-dock" hidden>

@@ -6,6 +6,7 @@ import { CpuBackend, simulate } from '../src/sim/driver.js';
 import { CpuSolver } from '../src/sim/cpuSolver.js';
 import { buildGauges, prepareTerrain } from '../src/sim/model.js';
 import { rasterizeLine } from '../src/data/rivers.js';
+import { runMetrics, analyseComparison, diffCodes, durationAbove } from '../src/sim/compare.js';
 import { drainageLabels, basinMask, accumulation, upstreamMask, flowDirections } from '../src/hydrology/terrain.js';
 
 let failures = 0;
@@ -252,6 +253,36 @@ await test('pont en remblai dans le MNT : lit creusé en pente continue vers l\'
     const b = cells[n];
     assert.ok(Math.abs(a - b) === 1 || Math.abs(a - b) === nx, 'maille reliée par un coin seulement');
   }
+});
+
+await test('comparaison : indicateurs, analyse et carte des écarts', () => {
+  // Hydrogramme triangulaire : pic 10 m³/s à 1 h, base 2 h → 36 000 m³
+  const series = [[0, 0], [3600, 10], [7200, 0]];
+  const hmax = new Float32Array([0, 0.2, 0.6, 1.2]);
+  const m = runMetrics({ series, gaugeAreaKm2: 1, hmax, tmax: new Float32Array(4), vmax: new Float32Array([0, 0.3, 0.6, 1]), mask: null, cellKm2: 0.01, placeK: 2, placeSeries: [[0, 0], [3600, 0.6], [7200, 0]], rainMm: 72 });
+  assert.equal(m.qPeak, 10);
+  assert.equal(m.tPeak, 3600);
+  assert.ok(Math.abs(m.volume - 36000) < 1e-6);
+  assert.ok(Math.abs(m.share - 0.5) < 1e-9, 'part de pluie');
+  assert.ok(Math.abs(m.a10 - 0.03) < 1e-9 && Math.abs(m.a50 - 0.02) < 1e-9 && Math.abs(m.a100 - 0.01) < 1e-9);
+  assert.ok(Math.abs(durationAbove([[0, 0], [3600, 0.6], [7200, 0]], 0.3) - 3600) < 1e-6);
+  const mk = (label, amc, f) => ({ label, p: { rainMm: 72, rainH: 3, amc }, m: { ...m, qPeak: m.qPeak * f, volume: m.volume * f, a10: m.a10 * f, hPlace: m.hPlace * f } });
+  const txt = analyseComparison([mk('Sec', 1, 0.3), mk('Normal', 2, 1), mk('Saturé <b>', 3, 1.6)], { areaKm2: 1 }).join(' ');
+  assert.ok(txt.includes('le plus défavorable sur tous les critères'), txt);
+  assert.ok(txt.includes('très sensible'), 'sensibilité au sol');
+  assert.ok(txt.includes('&lt;b&gt;') && !txt.includes('<b>'), 'nom échappé');
+  const dur = analyseComparison(
+    [
+      { label: 'Orage', p: { rainMm: 90, rainH: 3, amc: 2 }, m: { ...m, qPeak: 40, volume: 1e5 } },
+      { label: 'Longue', p: { rainMm: 130, rainH: 24, amc: 2 }, m: { ...m, qPeak: 20, volume: 3e5 } },
+    ],
+    { areaKm2: 20 },
+  ).join(' ');
+  assert.ok(dur.includes('c\'est elle qui donne le pic le plus fort') && dur.includes('volumes à stocker'), dur);
+  const { codes, stats } = diffCodes(new Float32Array([0, 0.5, 0.5, 0.05]), new Float32Array([0, 0.52, 1.5, 0.4]), null);
+  assert.deepEqual([codes[0], codes[1]], [0, 128]);
+  assert.ok(codes[2] > 200 && codes[3] > 128);
+  assert.equal(stats.newWet, 1);
 });
 
 console.log(failures ? `\n${failures} échec(s)` : '\nTous les tests passent.');
