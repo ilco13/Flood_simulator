@@ -619,6 +619,14 @@ button.icon {
   height: 4px;
   vertical-align: 2px;
 }
+.legend i.sw-bldg {
+  background: repeating-linear-gradient(90deg, #ddd6ca 0 4px, #9fb4c7 4px 6px);
+  border-top: 2px solid #8a4b3a;
+}
+.legend i.sw-wall {
+  background: #646973;
+  width: 5px;
+}
 .legend i.sw-soil {
   background: #b48a5c;
   border-top: 3px solid #5f8f3a;

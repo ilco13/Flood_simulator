@@ -139,6 +139,81 @@ function cssVar(name, fallback) {
   return v || fallback;
 }
 
+let bldgPattern = null;
+function getBuildingPattern(ctx) {
+  if (bldgPattern) return bldgPattern;
+  // Façade : enduit clair et fenêtres
+  const c = document.createElement('canvas');
+  c.width = 10;
+  c.height = 12;
+  const g = c.getContext('2d');
+  g.fillStyle = '#ddd6ca';
+  g.fillRect(0, 0, 10, 12);
+  g.fillStyle = '#9fb4c7';
+  g.fillRect(3, 3, 4, 5);
+  bldgPattern = ctx.createPattern(c, 'repeat');
+  return bldgPattern;
+}
+
+/**
+ * Bâtiments et murs ajoutés par l'utilisateur, dessinés au-dessus du terrain LiDAR :
+ * façade à fenêtres et toit pour un bâtiment, béton pour un mur (au moins 4 px de large,
+ * sinon un mur de 20 cm serait invisible sur une coupe de plusieurs centaines de mètres).
+ */
+function drawObstacles(ctx, { pts, soil, ground, kind, X, Y, pad, pw, ph }) {
+  const n = pts.length;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(pad.l, pad.t, pw, ph);
+  ctx.clip();
+  let i = 0;
+  while (i < n) {
+    if (!kind[i] || !Number.isFinite(soil[i])) {
+      i++;
+      continue;
+    }
+    const k = kind[i];
+    const i0 = i;
+    while (i < n && kind[i] === k && Number.isFinite(soil[i])) i++;
+    const i1 = i - 1;
+    if (k === 1) {
+      ctx.beginPath();
+      ctx.moveTo(X(pts[i0].d), Y(soil[i0]));
+      for (let m = i0; m <= i1; m++) ctx.lineTo(X(pts[m].d), Y(ground[m]));
+      for (let m = i1; m >= i0; m--) ctx.lineTo(X(pts[m].d), Y(soil[m]));
+      ctx.closePath();
+      ctx.fillStyle = getBuildingPattern(ctx);
+      ctx.fill();
+      ctx.strokeStyle = '#7a6f62';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      // Toit
+      ctx.strokeStyle = '#8a4b3a';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      for (let m = i0; m <= i1; m++) (m === i0 ? ctx.moveTo : ctx.lineTo).call(ctx, X(pts[m].d), Y(ground[m]));
+      ctx.stroke();
+    } else {
+      let top = -Infinity;
+      let bot = Infinity;
+      for (let m = i0; m <= i1; m++) {
+        top = Math.max(top, ground[m]);
+        bot = Math.min(bot, soil[m]);
+      }
+      const xa = X(pts[i0].d);
+      const xb = X(pts[i1].d);
+      const w = Math.max(4, xb - xa);
+      const xc = (xa + xb) / 2;
+      ctx.fillStyle = '#646973';
+      ctx.fillRect(xc - w / 2, Y(top), w, Y(bot) - Y(top));
+      ctx.strokeStyle = '#3f434a';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(xc - w / 2, Y(top), w, Y(bot) - Y(top));
+    }
+  }
+  ctx.restore();
+}
+
 let soilPattern = null;
 function getSoilPattern(ctx) {
   if (soilPattern) return soilPattern;
@@ -191,8 +266,14 @@ export function drawSection(canvas, s) {
   const ph = H - pad.t - pad.b;
   const { pts, L } = s;
   const n = pts.length;
+  // soil : terrain LiDAR ; ground : terrain + bâtiments et murs ajoutés (ce que l'eau « voit »)
+  const soil = new Float32Array(n);
   const ground = new Float32Array(n);
-  for (let i = 0; i < n; i++) ground[i] = (s.fine && Number.isFinite(s.fine[i]) ? s.fine[i] : pts[i].zi) + (s.raise?.[i] || 0);
+  const kind = s.raise?.kind;
+  for (let i = 0; i < n; i++) {
+    soil[i] = s.fine && Number.isFinite(s.fine[i]) ? s.fine[i] : pts[i].zi;
+    ground[i] = soil[i] + (s.raise?.[i] || 0);
+  }
   // Niveaux d'eau (surface libre) à l'instant et maximum, tirés de la simulation
   // Même seuil pour les deux (10 cm) : la lame de ruissellement sur les versants n'est pas tracée.
   const level = poolLevels(pts, ground, (p) => p.h, 0.1, s.cell);
@@ -304,9 +385,9 @@ export function drawSection(canvas, s) {
   ctx.beginPath();
   let started = false;
   for (let i = 0; i < n; i++) {
-    if (!Number.isFinite(ground[i])) continue;
+    if (!Number.isFinite(soil[i])) continue;
     const x = X(pts[i].d);
-    const y = Y(ground[i]);
+    const y = Y(soil[i]);
     started ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
     started = true;
   }
@@ -323,6 +404,7 @@ export function drawSection(canvas, s) {
   ctx.restore();
 
   drawWater(level, waterGrad, true);
+  if (kind) drawObstacles(ctx, { pts, soil, ground, kind, X, Y, pad, pw, ph });
 
   // Herbe en surface (par-dessus l'eau côté berges seulement)
   ctx.save();
@@ -336,7 +418,7 @@ export function drawSection(canvas, s) {
   started = false;
   for (let i = 0; i < n; i++) {
     const dry = !(level[i] > ground[i]);
-    if (!Number.isFinite(ground[i]) || !dry) {
+    if (!Number.isFinite(ground[i]) || !dry || kind?.[i]) {
       started = false;
       continue;
     }
@@ -359,7 +441,7 @@ export function drawSection(canvas, s) {
     ctx.strokeStyle = 'rgba(60, 225, 190, 0.9)';
     for (let i = 1; i < n; i++) {
       const h = Math.min(pts[i].h, pts[i - 1].h);
-      if (!(h > 0.01) || level[i] > ground[i] || level[i - 1] > ground[i - 1]) continue;
+      if (!(h > 0.01) || level[i] > ground[i] || level[i - 1] > ground[i - 1] || kind?.[i] || kind?.[i - 1]) continue;
       if (!Number.isFinite(ground[i]) || !Number.isFinite(ground[i - 1])) continue;
       ctx.lineWidth = 2 + Math.min(4, h * 40);
       ctx.beginPath();
@@ -458,7 +540,8 @@ export function drawSection(canvas, s) {
       const lm = levelMax[i];
       return {
         d: pts[i].d,
-        ground: g,
+        ground: soil[i],
+        obstacle: kind?.[i] ? { kind: kind[i], h: g - soil[i] } : null,
         depth: lv > g ? lv - g : 0,
         maxDepth: lm > g ? lm - g : 0,
         level: lv > g ? lv : NaN,
@@ -507,11 +590,28 @@ function poolLevels(pts, ground, depthOf, thr, cell) {
         swl += h * (pts[m].zc + h);
       }
       lv[k - i] = swl / sw;
-      if (ground[k] < lv[k - i]) out[k] = lv[k - i];
+      // Terrain fin plus haut que le niveau simulé (lit lissé ou creusé dans le modèle) :
+      // on garde au moins la hauteur d'eau simulée posée sur le terrain fin.
+      // Hauteur dessinée bornée par la hauteur simulée de la maille : au moins celle-ci (terrain
+      // fin plus haut que le lit lissé du modèle), au plus +30 cm ou +50 % (terrain fin plus bas).
+      const hk = depthOf(pts[k]);
+      const d = Math.min(Math.max(lv[k - i] - ground[k], hk), hk + Math.max(0.3, 0.5 * hk));
+      out[k] = ground[k] + d;
     }
-    // Bords du tronçon : l'eau s'étend sur le terrain fin tant qu'il reste sous le niveau.
-    for (let k = i - 1; k >= 0 && ground[k] < lv[0]; k--) if (!(out[k] >= lv[0])) out[k] = lv[0];
-    for (let k = j; k < n && ground[k] < lv[j - i - 1]; k++) if (!(out[k] >= lv[j - i - 1])) out[k] = lv[j - i - 1];
+    // Bords du tronçon : l'eau déborde sur le terrain fin plus bas que le niveau, mais d'une
+    // maille au plus (au-delà, la simulation dit que c'est sec).
+    const reach = Math.max(1, Math.round((cell || step) / (step || 1)));
+    const spill = (k0, dir, edge) => {
+      const L = out[edge];
+      const he = depthOf(pts[edge]);
+      for (let k = k0, m = 0; k >= 0 && k < n && m < reach; k += dir, m++) {
+        const d = L - ground[k];
+        if (!(d > 0) || d > he + Math.max(0.3, 0.5 * he)) break;
+        if (!(out[k] >= L)) out[k] = L;
+      }
+    };
+    spill(i - 1, -1, i);
+    spill(j, 1, j - 1);
     i = j;
   }
   return out;

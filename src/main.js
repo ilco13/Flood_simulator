@@ -2117,6 +2117,8 @@ function renderObstacles() {
 function obstacleRaise(pts) {
   const obs = obstaclesL93();
   const out = new Float32Array(pts.length);
+  // Type d'ouvrage par point : 1 bâtiment, 2 mur (pour le dessin de la coupe)
+  out.kind = new Uint8Array(pts.length);
   if (!obs.length) return out;
   const inPoly = (P, x, y) => {
     let c = false;
@@ -2141,7 +2143,10 @@ function obstacleRaise(pts) {
       let hit = false;
       if (o.type === 'building') hit = inPoly(o.pts, x, y);
       else for (let s = 0; s < o.pts.length - 1 && !hit; s++) hit = distSeg(x, y, o.pts[s], o.pts[s + 1]) <= Math.max(0.3, step / 2);
-      if (hit) out[i] = Math.max(out[i], o.h);
+      if (hit && o.h >= out[i]) {
+        out[i] = o.h;
+        out.kind[i] = o.type === 'building' ? 1 : 2;
+      }
     }
   }
   return out;
@@ -2216,6 +2221,7 @@ function setupSection() {
     const fmtD = (h) => (h < 1 ? `${Math.round(h * 100)} cm` : `${h.toFixed(2).replace('.', ',')} m`);
     $('section-info').innerHTML =
       `À ${Math.round(inf.d)} m de A : sol à <strong>${Number.isFinite(inf.ground) ? inf.ground.toFixed(2).replace('.', ',') : '–'} m</strong>` +
+      (inf.obstacle ? ` · <strong>${inf.obstacle.kind === 1 ? 'bâtiment' : 'mur'} ajouté</strong> de ${fmtD(inf.obstacle.h)}` : '') +
       ` · eau ${inf.depth > 0.01 ? `<strong>${fmtD(inf.depth)}</strong>` : 'aucune'}` +
       (inf.maxDepth > 0.01 ? ` · max ${fmtD(inf.maxDepth)}` : '');
     setGeoJson(state.map, 'section-hover', {
@@ -2379,7 +2385,9 @@ function redrawSection(resample = true) {
     });
   }
   const timeLabel = state.viewMode === 'max' || state.cursorT == null ? 'Maximum atteint' : `À ${fmtH(state.cursorT)}`;
-  sec.helper = drawSection($('section-canvas'), { ...sec.sample, raise: obstacleRaise(sec.sample.pts), fine: sec.fine, runoff: state.runoff, timeLabel, hover: sec.hover, cell: grid.dx });
+  const raise = obstacleRaise(sec.sample.pts);
+  $('sec-obs').hidden = !raise.kind.some((k) => k > 0);
+  sec.helper = drawSection($('section-canvas'), { ...sec.sample, raise, fine: sec.fine, runoff: state.runoff, timeLabel, hover: sec.hover, cell: grid.dx });
 }
 
 /* ---------- Simulations enregistrées ---------- */
