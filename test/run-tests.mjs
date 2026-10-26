@@ -6,6 +6,7 @@ import { CpuBackend, simulate } from '../src/sim/driver.js';
 import { CpuSolver } from '../src/sim/cpuSolver.js';
 import { buildGauges, prepareTerrain } from '../src/sim/model.js';
 import { rasterizeLine } from '../src/data/rivers.js';
+import { floodQuantiles } from '../src/hydrology/flood.js';
 import { runMetrics, analyseComparison, diffCodes, durationAbove } from '../src/sim/compare.js';
 import { drainageLabels, basinMask, accumulation, upstreamMask, flowDirections } from '../src/hydrology/terrain.js';
 
@@ -277,6 +278,28 @@ await test("plafond d'infiltration : un orage intense ruisselle même sur un sol
   // Diagnostic du panneau : même ordre de grandeur que la simulation
   const d = meanRunoffHyeto(S, new Float32Array(N).fill(8 / 3.6e6), 3, hy, 1800);
   assert.ok(Math.abs(d - q) < 0.15 * q + 0.5, `diagnostic ${d.toFixed(1)} vs ${q.toFixed(1)}`);
+});
+
+await test("apport d'une rivière : volume injecté conservé (bilan de masse)", async () => {
+  const nx = 30, ny = 10, dx = 10, N = nx * ny;
+  const z = new Float32Array(N);
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) z[j * nx + i] = 100 - 0.01 * i * dx + 0.05 * Math.abs(j - 5) * dx;
+  const b = new CpuBackend({ nx, ny, dx, z, S: new Float32Array(N).fill(-1), manning: new Float32Array(N).fill(0.04), inflow: { cells: Int32Array.from([5 * nx + 1, 4 * nx + 1]), Q: 3, ramp: 600 } }, []);
+  const hy = makeHyetograph({ totalMm: 0, durationH: 1, shape: 'uniform' });
+  await simulate(b, { hyeto: hy, totalTime: 3600, gaugeEvery: 300, snapshotEvery: 3600 });
+  const m = b.massBalance();
+  const expected = 3 * (3600 - 300); // montée linéaire sur 10 min
+  assert.ok(Math.abs(m.rain - expected) / expected < 0.01, `apport ${m.rain.toFixed(0)} m³ au lieu de ${expected}`);
+  assert.ok(Math.abs(m.rain - m.out - m.stored) / m.rain < 1e-3, 'bilan de masse');
+  assert.ok(m.out > 0.5 * m.rain, "l'eau s'écoule vers l'aval");
+});
+
+await test('débits de crue estimés (CRUPEDIX + gradex)', () => {
+  const a = floodQuantiles(100, 80, 120);
+  assert.ok(Math.abs(a.q10 - 100 ** 0.8) < 1e-9, 'CRUPEDIX neutre');
+  assert.ok(a.q100 > 1.5 * a.q10 && a.q100 < 5 * a.q10, `rapport Q100/Q10 ${(a.q100 / a.q10).toFixed(2)}`);
+  const b = floodQuantiles(1000, 80, 120);
+  assert.ok(b.q10 > a.q10 && b.q100 > a.q100, 'croît avec la surface');
 });
 
 await test('comparaison : indicateurs, analyse et carte des écarts', () => {

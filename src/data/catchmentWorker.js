@@ -5,7 +5,7 @@
 
 import { LAYERS } from '../config.js';
 import { fetchFloatGrid } from './wms.js';
-import { fetchRivers, riverCandidates } from './rivers.js';
+import { fetchRivers, riverCandidates, nearestRiverName } from './rivers.js';
 import { flowModel, snapToStream } from '../sim/model.js';
 import { upstreamMask } from '../hydrology/terrain.js';
 import { makeGrid, cellOf, cellCenter, toWgs } from '../geo.js';
@@ -83,6 +83,77 @@ function snapNearWithArea(grid, acc, trace, x0, y0, minCells, radius) {
       }
   }
   return best;
+}
+
+// Rivière aval : on suit la pente depuis le point du cours d'eau jusqu'à la confluence avec une
+// branche au moins aussi grande (et d'au moins 1 km²), dans la limite de RECV_MAX_PATH.
+const RECV_MAX_PATH = 6000; // m
+const RECV_UP = 600; // m : point d'injection du débit de la rivière, en amont de la confluence
+const RECV_MAX_LEVEL = 3;
+const RECV_DOWN = 1200; // m : longueur de rivière gardée en aval de la confluence
+
+const stepLen = (a, b, nx, dx) => (Math.abs(a - b) === 1 || Math.abs(a - b) === nx ? dx : dx * Math.SQRT2);
+
+/** Maille amont la plus drainée de k (en excluant `skip`). */
+function mainUpstream(grid, down, acc, k, skip = -1) {
+  const { nx, ny } = grid;
+  const i = k % nx;
+  const j = (k - i) / nx;
+  let best = -1;
+  for (let dj = -1; dj <= 1; dj++)
+    for (let di = -1; di <= 1; di++) {
+      if (!di && !dj) continue;
+      const ii = i + di;
+      const jj = j + dj;
+      if (ii < 0 || jj < 0 || ii >= nx || jj >= ny) continue;
+      const n = jj * nx + ii;
+      if (n !== skip && down[n] === k && (best < 0 || acc[n] > acc[best])) best = n;
+    }
+  return best;
+}
+
+/**
+ * Cherche la rivière qui reçoit le cours d'eau calé en k0.
+ * @returns null (rien dans la limite), { exits: true } (la grille est trop petite), ou la confluence
+ */
+function findReceiver(grid, fm, k0) {
+  const { nx, dx } = grid;
+  const { down, acc } = fm;
+  const minCells = 1e6 / (dx * dx);
+  let k = k0;
+  let len = 0;
+  while (len < RECV_MAX_PATH) {
+    const kn = down[k];
+    if (kn < 0) return { exits: true };
+    len += stepLen(k, kn, nx, dx);
+    const other = mainUpstream(grid, down, acc, kn, k);
+    if (other >= 0 && acc[other] >= Math.max(acc[k], minCells)) {
+      // Rivière réceptrice : on remonte sa branche principale, puis on descend sous la confluence.
+      const up = [];
+      let u = other;
+      let lu = 0;
+      while (u >= 0 && lu < RECV_UP) {
+        up.push(u);
+        const nu = mainUpstream(grid, down, acc, u);
+        if (nu < 0) break;
+        lu += stepLen(u, nu, nx, dx);
+        u = nu;
+      }
+      const dn = [];
+      let d = kn;
+      let ld = 0;
+      while (d >= 0 && ld < RECV_DOWN) {
+        dn.push(d);
+        const nd = down[d];
+        if (nd < 0) break;
+        ld += stepLen(d, nd, nx, dx);
+        d = nd;
+      }
+      return { conf: kn, other, distM: len, reach: [...up.reverse(), ...dn] };
+    }
+    k = kn;
+  }
+  return null;
 }
 
 function touchesEdge(mask, nx, ny) {
@@ -192,16 +263,46 @@ self.onmessage = async (e) => {
           continue;
         }
         if (l === 0 && c.kind === 'stream') c.dz = zHouse - bedLevel(dem, grid, k);
-        const { mask, cells } = upstreamMask(fm.down, fm.order, k);
-        const i0 = k % grid.nx;
-        [c.px, c.py] = cellCenter(grid, i0, (k - i0) / grid.nx);
-        c.areaM2 = cells * dx * dx;
-        c.dx = dx;
-        c.complete = !touchesEdge(mask, grid.nx, grid.ny);
-        c.bbox = maskBbox(mask, grid);
-        c.outline = outlineWgs(mask, grid);
+        // Bassin déjà complet à un palier plus fin : on ne cherche plus que la rivière aval.
+        if (!c.complete) {
+          const { mask, cells } = upstreamMask(fm.down, fm.order, k);
+          const i0 = k % grid.nx;
+          [c.px, c.py] = cellCenter(grid, i0, (k - i0) / grid.nx);
+          c.areaM2 = cells * dx * dx;
+          c.dx = dx;
+          c.complete = !touchesEdge(mask, grid.nx, grid.ny);
+          c.bbox = maskBbox(mask, grid);
+          c.outline = outlineWgs(mask, grid);
+        }
+        if (c.kind === 'stream' && !c.recvDone) {
+          const r = findReceiver(grid, fm, k);
+          if (!r) c.recvDone = true;
+          else if (!r.exits) {
+            const um = upstreamMask(fm.down, fm.order, r.other);
+            const pt = (n) => {
+              const ii = n % grid.nx;
+              return cellCenter(grid, ii, (n - ii) / grid.nx);
+            };
+            const reach = r.reach.map(pt);
+            const src = reach[0];
+            const name = rivers ? nearestRiverName(rivers, src[0], src[1], 150, c.named ? c.name : null) : null;
+            const conf = pt(r.conf);
+            const prev = c.receiver;
+            // Même confluence qu'à un palier plus fin : on garde son tracé (plus précis), et on ne
+            // met à jour que la surface du bassin de la rivière.
+            const same = prev && Math.hypot(prev.conf[0] - conf[0], prev.conf[1] - conf[1]) < Math.max(300, 3 * dx);
+            c.receiver = {
+              ...(same ? prev : { distM: r.distM, conf, src, reach, dx }),
+              name: (same && prev.name) || name || prev?.name || null,
+              areaKm2: (fm.acc[r.other] * dx * dx) / 1e6,
+              complete: !touchesEdge(um.mask, grid.nx, grid.ny),
+            };
+            if (c.receiver.complete) c.recvDone = true;
+          }
+        }
       }
-      active = active.filter((c) => !c.failed && !c.complete);
+      // La recherche de la rivière aval va jusqu'au dernier palier (60 km) ; au-delà, sa surface est un minimum.
+      active = active.filter((c) => !c.failed && (!c.complete || (c.kind === 'stream' && !c.recvDone && l < RECV_MAX_LEVEL)));
       if (!active.length) break;
     }
     // Deux points calés sur le même lit (deux noms pour un même tracé) : on garde le premier.
@@ -237,6 +338,9 @@ self.onmessage = async (e) => {
         pointWgs: toWgs(c.px, c.py),
         bbox: c.bbox,
         outline: c.outline,
+        receiver: c.receiver
+          ? { ...c.receiver, reachWgs: c.receiver.reach.map(([a, b]) => toWgs(a, b)), confWgs: toWgs(...c.receiver.conf), srcWgs: toWgs(...c.receiver.src) }
+          : null,
       });
     }
     post('done', { house: { x, y }, houseWgs: toWgs(x, y), zHouse, cands: out });

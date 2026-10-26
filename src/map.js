@@ -147,13 +147,26 @@ export async function createMap(container) {
         },
       },
       {
+        // Rivière aval : tronçon simulé autour de la confluence
+        id: 'catchment-aval',
+        type: 'line',
+        source: 'catchment',
+        filter: ['==', ['geometry-type'], 'LineString'],
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: {
+          'line-color': '#1971c2',
+          'line-width': ['case', ['==', ['get', 'on'], 1], 5, 3],
+          'line-opacity': ['case', ['==', ['get', 'on'], 1], 0.85, 0.35],
+        },
+      },
+      {
         id: 'catchment-point',
         type: 'circle',
         source: 'catchment',
         filter: ['==', ['geometry-type'], 'Point'],
         paint: {
           'circle-radius': ['case', ['has', 'house'], 8, 5],
-          'circle-color': ['case', ['has', 'house'], '#d6363b', ['==', ['get', 'on'], 1], '#ff9f1c', '#9aa5b1'],
+          'circle-color': ['case', ['has', 'house'], '#d6363b', ['has', 'src'], ['case', ['==', ['get', 'on'], 1], '#1971c2', '#a5c8ec'], ['==', ['get', 'on'], 1], '#ff9f1c', '#9aa5b1'],
           'circle-stroke-color': '#fff',
           'circle-stroke-width': 2,
         },

@@ -18,6 +18,7 @@ import { Water3DLayer } from './render/water3d.js';
 import { packRun, saveRun, listRuns, loadRun, deleteRun, renameRun, exportRun, importRun, formatSize } from './data/runStore.js';
 import { fitBoundsOf } from './map.js';
 import { sectionEnds, autoOrientation, fetchFineProfile, sampleSection, drawSection } from './ui/section.js';
+import { floodQuantiles } from './hydrology/flood.js';
 import { runMetrics, analyseComparison, diffCodes, buildDiffLut, diffColor, DIFF_MAX, fmtQ, fmtVol, fmtSurf, fmtDepthC, fmtDurC, AMC_NAME, hazardOf } from './sim/compare.js';
 
 const $ = (id) => document.getElementById(id);
@@ -81,6 +82,7 @@ function params() {
     burn: Math.max(0, Number($('burn').value) || 0),
     cnFactor: Math.max(0.1, Number($('cnf').value) || 1),
     capInf: $('cap-inf').checked,
+    ...avalParams(),
     engine: $('engine').value,
   };
 }
@@ -97,7 +99,7 @@ function hyetoOf(p) {
 
 /** Grille de calcul : bassins versants retenus autour du lieu étudié. */
 function currentGrid(p) {
-  const f = studyFrame();
+  const f = studyFrame(p);
   if (!f || !studyCands().length) return null;
   const snap = (v, fn) => fn(v / p.res) * p.res;
   return makeGrid(
@@ -355,6 +357,7 @@ function setupUi() {
   $('play').onclick = togglePlay;
   setupSection();
   setupCompare();
+  setupAval();
   setupCatchment();
   setupSearch();
   setupObstacles();
@@ -627,9 +630,9 @@ function loadData(grid, p) {
           : { x: c.point.x, y: c.point.y, areaM2: c.areaKm2 * 1e6, radiusM: Math.max(30, 1.5 * c.dx) },
       )
     : null;
-  const gauges = [...studyGauges(), ...GAUGES];
+  const gauges = [...studyGauges(p), ...GAUGES];
   const obstacles = obstaclesL93();
-  const key = JSON.stringify([grid.xmin, grid.ymin, grid.nx, grid.ny, grid.dx, p.burn, upstreamOf, obstacles]);
+  const key = JSON.stringify([grid.xmin, grid.ymin, grid.nx, grid.ny, grid.dx, p.burn, upstreamOf, obstacles, gauges.map((g) => [g.id, g.x, g.y])]);
   if (state.data?.key === key) return Promise.resolve(state.data);
   return new Promise((resolve, reject) => {
     const w = new Worker(new URL('./data/prepWorker.js', import.meta.url), { type: 'module' });
@@ -751,6 +754,12 @@ async function startRun() {
       cnFactor: p.cnFactor,
       capInfiltration: p.capInf,
     });
+    if (p.aval) {
+      const r = mainReceiver()?.receiver;
+      const cells = r ? inflowCells(grid, data.z || data.dem, r.src) : null;
+      if (cells?.length) model.inflow = { cells, Q: p.aval.Q, ramp: AVAL_RAMP };
+      else data.warnings = [...(data.warnings || []), 'rivière aval hors de la zone de calcul : non simulée'];
+    }
     run.gauges = data.gauges;
     run.series = data.gauges.map(() => [[0, 0]]);
 
@@ -857,7 +866,10 @@ async function startRun() {
 function peakPassed(run, t, p) {
   if (t < p.rainH * 3600 + 1800) return false;
   let any = false;
-  for (const s of run.series) {
+  for (let gi = 0; gi < run.series.length; gi++) {
+    // La rivière aval est maintenue en crue : son débit ne retombe pas.
+    if (run.gauges?.[gi]?.id === 'aval') continue;
+    const s = run.series[gi];
     let peak = 0;
     for (const [, q] of s) if (q > peak) peak = q;
     if (peak < 0.05) continue;
@@ -936,6 +948,10 @@ function finishRun(run, mass) {
   if (mass) {
     const err = mass.rain > 0 ? ((mass.rain - mass.out - mass.stored) / mass.rain) * 100 : 0;
     txt += `<br>Bilan de masse : erreur ${fmtNum(err, 3)} %.`;
+  }
+  if (run.params.aval) {
+    const r = mainReceiver()?.receiver;
+    txt += `<br>Rivière aval${r?.name ? ` (${escHtml(r.name)})` : ''} maintenue en crue à <strong>${fmtNum(run.params.aval.Q)} m³/s</strong> pendant tout l'épisode.`;
   }
   if (state.data.warnings?.length) txt += `<br><span class="warn">Données : ${state.data.warnings.join(' ; ')}.</span>`;
   $('summary').innerHTML = txt;
@@ -1570,7 +1586,15 @@ function renderRainRef() {
     sc.mm = sc.mm * sc.arf;
     if (sc.arf < 0.995) sc.note += ` ; ${fmtNum(sc.point)} mm au point, ${fmtNum(sc.mm)} mm en moyenne sur ${fmtArea(areaKm2)} (abattement ×${fmtNum(sc.arf, 2)})`;
   }
-  if (state.study) state.study.rainScen = scen;
+  if (state.study) {
+    state.study.rainScen = scen;
+    // Pluies journalières décennale et centennale (pour estimer les crues de la rivière aval)
+    if (pool.length) {
+      const hadPj = !!state.study.pj;
+      state.study.pj = { q10: avg('q10'), q100: avg('q100') };
+      if (!hadPj) renderAval();
+    }
+  }
   const btn = (sc, i) =>
     `<button type="button" class="ref-chip" data-i="${i}" title="${sc.note}"><strong>${sc.label}</strong>` +
     `<span>${fmtNum(sc.mm)} mm en ${sc.h} h</span></button>`;
@@ -1703,8 +1727,8 @@ function defaultChecked(c) {
 const studyCands = () => (state.study?.cands || []).filter((c) => c.checked);
 
 /** Points de suivi du débit au droit du lieu, un par cours d'eau retenu. */
-function studyGauges() {
-  return studyCands()
+function studyGauges(p = null) {
+  const out = studyCands()
     .filter((c) => c.kind === 'stream')
     .map((c, i) => ({
       id: `study${i}`,
@@ -1714,10 +1738,169 @@ function studyGauges() {
       river: c.named ? c.name : null,
       halfWidth: Math.round(Math.min(450, Math.max(40, 40 * Math.sqrt(c.areaKm2)))),
     }));
+  // Rivière aval : point de suivi sous la confluence (le vallat et la rivière réunis).
+  const r = (p ?? params()).avalFrame ? mainReceiver()?.receiver : null;
+  if (r) {
+    const ic = nearestIndex(r.reach, r.conf);
+    const [x, y] = r.reach[Math.min(r.reach.length - 1, ic + Math.max(2, Math.round((r.reach.length - 1 - ic) / 3)))];
+    out.push({
+      id: 'aval',
+      name: `${r.name || 'Rivière aval'} (sous la confluence)`,
+      x,
+      y,
+      river: r.name,
+      halfWidth: Math.round(Math.min(450, Math.max(40, 40 * Math.sqrt(r.areaKm2)))),
+    });
+  }
+  return out;
+}
+
+const nearestIndex = (pts, [x, y]) => {
+  let best = 0;
+  pts.forEach(([a, b], i) => Math.hypot(a - x, b - y) < Math.hypot(pts[best][0] - x, pts[best][1] - y) && (best = i));
+  return best;
+};
+
+/* ---------- Rivière aval en crue (remous à la confluence) ---------- */
+
+const AVAL_RAMP = 1800; // s : montée de la rivière jusqu'au débit choisi
+
+/** Cours d'eau principal retenu (le plus grand) et sa rivière aval, s'il y en a une. */
+function mainReceiver() {
+  const streams = studyCands().filter((c) => c.kind === 'stream');
+  if (!streams.length) return null;
+  const c = streams.reduce((a, b) => (b.areaKm2 > a.areaKm2 ? b : a));
+  return c.receiver ? c : null;
+}
+
+/** Débits de crue estimés de la rivière aval (m³/s). */
+function avalEstimates() {
+  const r = mainReceiver()?.receiver;
+  if (!r) return null;
+  const pj = state.study?.pj;
+  return { ...floodQuantiles(r.areaKm2, pj?.q10 ?? 80, pj?.q100 ?? 120), fromRain: !!pj };
+}
+
+function avalSettings() {
+  const s = state.study;
+  if (!s) return { on: false, mode: 'q100', custom: null };
+  s.aval ??= { on: false, mode: 'q100', custom: null };
+  return s.aval;
+}
+
+/** Paramètres de calcul liés à la rivière aval : { aval: { Q } | null, avalFrame }. */
+function avalParams() {
+  const a = avalSettings();
+  const est = a.on ? avalEstimates() : null;
+  const Q = !est ? 0 : a.mode === 'custom' ? Math.max(0, Number(a.custom) || 0) : Math.round(a.mode === 'q10' ? est.q10 : est.q100);
+  const aval = est && Q > 0 ? { Q, mode: a.mode } : null;
+  return { aval, avalFrame: !!aval || (!!state.forceAvalFrame && !!mainReceiver()) };
+}
+
+/** Mailles du lit de la rivière où l'on injecte son débit (les plus basses autour du point). */
+function inflowCells(grid, z, [x, y]) {
+  const c0 = cellOf(grid, x, y);
+  if (!c0) return null;
+  // Fond du lit le plus proche (le tracé peut être décalé de quelques dizaines de mètres)
+  const R = Math.max(1, Math.round(Math.max(60, 2 * grid.dx) / grid.dx));
+  let c = c0;
+  let zb = Infinity;
+  for (let dj = -R; dj <= R; dj++)
+    for (let di = -R; di <= R; di++) {
+      const i = c0.i + di;
+      const j = c0.j + dj;
+      if (di * di + dj * dj > R * R || i < 1 || j < 1 || i >= grid.nx - 1 || j >= grid.ny - 1) continue;
+      const v = z[j * grid.nx + i];
+      if (v < zb) {
+        zb = v;
+        c = { i, j };
+      }
+    }
+  const r = Math.max(1, Math.round(Math.max(25, 1.5 * grid.dx) / grid.dx));
+  const cand = [];
+  for (let dj = -r; dj <= r; dj++)
+    for (let di = -r; di <= r; di++) {
+      const i = c.i + di;
+      const j = c.j + dj;
+      if (di * di + dj * dj > r * r || i < 1 || j < 1 || i >= grid.nx - 1 || j >= grid.ny - 1) continue;
+      const k = j * grid.nx + i;
+      cand.push([z[k], k]);
+    }
+  if (!cand.length) return null;
+  cand.sort((a, b) => a[0] - b[0]);
+  const zmin = cand[0][0];
+  return Int32Array.from(cand.filter(([v]) => v <= zmin + 0.5).slice(0, 25).map(([, k]) => k));
+}
+
+function setupAval() {
+  $('aval-on').onchange = (e) => {
+    avalSettings().on = e.target.checked;
+    avalChanged();
+  };
+  $('aval-mode').onchange = (e) => {
+    const a = avalSettings();
+    a.mode = e.target.value;
+    if (a.mode === 'custom' && !a.custom) a.custom = Number($('aval-q').value) || null;
+    avalChanged();
+  };
+  $('aval-q').oninput = (e) => {
+    const a = avalSettings();
+    a.mode = 'custom';
+    a.custom = Number(e.target.value) || null;
+    $('aval-mode').value = 'custom';
+    saveStudy();
+    renderAvalInfo();
+  };
+}
+
+function avalChanged() {
+  saveStudy();
+  showStudy();
+  autoResForStudy();
+  renderStudy();
+  describeRes();
+}
+
+function renderAval() {
+  const box = $('aval-box');
+  const c = mainReceiver();
+  box.hidden = !c;
+  $('cmp-aval').hidden = !c;
+  document.querySelectorAll('.cmp-aval-row').forEach((el) => (el.hidden = !c));
+  if (!c) return;
+  const r = c.receiver;
+  const a = avalSettings();
+  const dist = r.distM < 1000 ? `${fmtNum(Math.round(r.distM / 10) * 10)} m` : `${fmtNum(r.distM / 1000, 1)} km`;
+  $('aval-desc').innerHTML =
+    `<strong></strong> se jette dans <strong></strong> ${dist} en aval du lieu (bassin de la rivière : ${fmtArea(r.areaKm2)}${r.complete ? '' : ' au moins'}).`;
+  const st = $('aval-desc').querySelectorAll('strong');
+  st[0].textContent = c.name;
+  st[1].textContent = r.name || 'une rivière sans nom';
+  $('aval-on').checked = a.on;
+  $('aval-opts').hidden = !a.on;
+  $('aval-mode').value = a.mode;
+  renderAvalInfo();
+}
+
+function renderAvalInfo() {
+  const a = avalSettings();
+  const est = avalEstimates();
+  const el = $('aval-info');
+  if (!est) return;
+  if (a.mode !== 'custom' || document.activeElement !== $('aval-q')) $('aval-q').value = a.mode === 'custom' ? (a.custom ?? '') : Math.round(a.mode === 'q10' ? est.q10 : est.q100);
+  const r = mainReceiver().receiver;
+  el.innerHTML = a.on
+    ? `Estimation (ordre de grandeur, méthodes CRUPEDIX et gradex${est.fromRain ? ', pluies Météo-France du lieu' : ', pluies du lieu pas encore connues'}) : ` +
+      `décennale ≈ <strong>${fmtNum(est.q10)} m³/s</strong>, centennale ≈ <strong>${fmtNum(est.q100)} m³/s</strong>. ` +
+      'Si vous connaissez le débit de crue de la rivière (HydroPortail, Vigicrues, PPRI), choisissez « Autre valeur ». ' +
+      `La rivière est maintenue à ce débit pendant tout l'épisode (cas défavorable), injecté ${fmtNum(600)} m en amont de la confluence ; ` +
+      `la zone de calcul s'étend jusqu'à la confluence (trait bleu sur la carte).` +
+      (r.distM > 3000 ? ' <span class="warn">Confluence éloignée : le remous ne remonte en général pas si loin, sauf en plaine.</span>' : '')
+    : 'Cochez pour simuler la rivière en crue au même moment : son niveau peut gêner l\'écoulement du cours d\'eau étudié et faire monter l\'eau en amont de la confluence (remous).';
 }
 
 /** Emprise (Lambert 93) à simuler : bassins retenus + abords du lieu, avec une marge. */
-function studyFrame() {
+function studyFrame(p = null) {
   const s = state.study;
   if (!s) return null;
   const b = { xmin: s.house.x - 300, xmax: s.house.x + 300, ymin: s.house.y - 300, ymax: s.house.y + 300 };
@@ -1727,6 +1910,15 @@ function studyFrame() {
     b.ymin = Math.min(b.ymin, c.bbox.ymin);
     b.ymax = Math.max(b.ymax, c.bbox.ymax);
   }
+  // Rivière aval : la zone s'étend jusqu'à la confluence et au tronçon de rivière autour.
+  const r = (p ?? params()).avalFrame ? mainReceiver()?.receiver : null;
+  if (r)
+    for (const [x, y] of r.reach) {
+      b.xmin = Math.min(b.xmin, x - 150);
+      b.xmax = Math.max(b.xmax, x + 150);
+      b.ymin = Math.min(b.ymin, y - 150);
+      b.ymax = Math.max(b.ymax, y + 150);
+    }
   const m = Math.max(150, 0.06 * Math.max(b.xmax - b.xmin, b.ymax - b.ymin));
   return { xmin: b.xmin - m, xmax: b.xmax + m, ymin: b.ymin - m, ymax: b.ymax + m };
 }
@@ -1858,6 +2050,15 @@ function showStudy() {
         .filter((c) => c.kind === 'stream')
         .map((c) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: c.pointWgs }, properties: { on: c.checked ? 1 : 0 } })),
       { type: 'Feature', geometry: { type: 'Point', coordinates: s.houseWgs }, properties: { house: 1 } },
+      ...(() => {
+        const r = mainReceiver()?.receiver;
+        if (!r?.reachWgs) return [];
+        const on = avalSettings().on ? 1 : 0;
+        return [
+          { type: 'Feature', geometry: { type: 'LineString', coordinates: r.reachWgs }, properties: { aval: 1, on } },
+          { type: 'Feature', geometry: { type: 'Point', coordinates: r.srcWgs }, properties: { src: 1, on } },
+        ];
+      })(),
     ],
   });
   $('catch-fit').disabled = false;
@@ -1866,6 +2067,8 @@ function showStudy() {
 
 function renderStudy() {
   const s = state.study;
+  if (s) renderAval();
+  else $('aval-box').hidden = true;
   const list = $('catch-list');
   const info = $('catch-info');
   $('catch-empty').hidden = !!s || !!state.catchWorker;
@@ -2401,7 +2604,7 @@ const mapReady = new Promise((r) => (resolveMapReady = r));
 
 function runName(p, partial, place) {
   const where = place || (p.zone === 'basin' ? 'Haute vallée de l\'Arc' : 'Zone affichée');
-  return `${where} · ${fmtShort(p.rainMm)} mm en ${fmtShort(p.rainH)} h · ${AMC_LABEL[p.amc]} · ${p.res} m${partial ? ' (partielle)' : ''}`;
+  return `${where} · ${fmtShort(p.rainMm)} mm en ${fmtShort(p.rainH)} h · ${AMC_LABEL[p.amc]}${p.aval ? ` · rivière aval ${fmtNum(p.aval.Q)} m³/s` : ''} · ${p.res} m${partial ? ' (partielle)' : ''}`;
 }
 
 /**
@@ -2683,10 +2886,26 @@ function setupCompare() {
       renderCmpList('Pluies de référence pas encore connues ici : cumuls tirés de la pluie saisie (75 % en 3 h), modifiables.');
     }
   };
+  $('cmp-aval').onclick = () => {
+    const p = params();
+    const base = { rainMm: p.rainMm, rainH: p.rainH, amc: p.amc };
+    const name = mainReceiver()?.receiver?.name || 'Rivière aval';
+    cmp.list = [
+      { label: `${name} sans crue`, ...base, aval: false },
+      { label: `${name} en crue`, ...base, aval: true },
+    ];
+    renderCmpList(avalSettings().on ? '' : 'Débit de crue de la rivière : réglage « Rivière en aval » du lieu étudié (centennale estimée par défaut).');
+  };
   $('cmp-add').onclick = () => {
     if (cmp.list.length >= CMP_MAX) return;
     const p = params();
-    cmp.list.push({ label: `${fmtShort(p.rainMm)} mm en ${fmtShort(p.rainH)} h, sol ${AMC_NAME[p.amc]}`, rainMm: p.rainMm, rainH: p.rainH, amc: p.amc });
+    cmp.list.push({
+      label: `${fmtShort(p.rainMm)} mm en ${fmtShort(p.rainH)} h, sol ${AMC_NAME[p.amc]}${p.aval ? ', rivière aval en crue' : ''}`,
+      rainMm: p.rainMm,
+      rainH: p.rainH,
+      amc: p.amc,
+      aval: !!p.aval,
+    });
     renderCmpList();
   };
   $('cmp-run').onclick = () => (cmp.running ? cancelComparison() : runComparison());
@@ -2725,12 +2944,19 @@ function renderCmpList(note = '') {
         <label>Cumul (mm)<input class="cmp-mm" type="number" min="1" max="1500" step="5" inputmode="decimal" /></label>
         <label>Durée (h)<input class="cmp-h" type="number" min="0.25" max="96" step="0.25" inputmode="decimal" /></label>
         <label>Sol<select class="cmp-amc"><option value="1">Sec</option><option value="2">Normal</option><option value="3">Saturé</option></select></label>
-      </div>`;
+      </div>
+      <label class="check small cmp-aval-row"><input type="checkbox" class="cmp-aval" /> Rivière aval en crue</label>`;
     const q = (c) => li.querySelector(c);
     q('.cmp-name').value = sc.label;
     q('.cmp-mm').value = sc.rainMm;
     q('.cmp-h').value = sc.rainH;
     q('.cmp-amc').value = String(sc.amc);
+    q('.cmp-aval-row').hidden = !mainReceiver();
+    q('.cmp-aval').checked = !!sc.aval;
+    q('.cmp-aval').onchange = (e) => {
+      sc.aval = e.target.checked;
+      updateCmpInfo();
+    };
     q('.cmp-name').oninput = (e) => (sc.label = e.target.value || `Scénario ${i + 1}`);
     q('.cmp-mm').oninput = (e) => {
       sc.rainMm = Math.max(1, Number(e.target.value) || 1);
@@ -2752,6 +2978,7 @@ function renderCmpList(note = '') {
     ol.appendChild(li);
   });
   $('cmp-add').disabled = cmp.list.length >= CMP_MAX;
+  $('cmp-aval').hidden = !mainReceiver();
   updateCmpInfo();
 }
 
@@ -2766,7 +2993,7 @@ function updateCmpInfo() {
     el.textContent = `${pre}Choisissez un modèle ci-dessus, ou ajoutez au moins deux réglages.`;
     return;
   }
-  const base = params();
+  const base = { ...params(), avalFrame: cmp.list.some((sc) => sc.aval) && !!mainReceiver() };
   const grid = currentGrid(base);
   if (!grid) {
     el.textContent = `${pre}Choisissez d'abord le lieu étudié.`;
@@ -2790,6 +3017,10 @@ function applyScenario(sc) {
   $('rain-h').value = sc.rainH;
   state.amc = sc.amc;
   $('amc').querySelectorAll('button').forEach((b) => b.classList.toggle('on', Number(b.dataset.v) === sc.amc));
+  if (sc.aval !== undefined && state.study) {
+    avalSettings().on = !!sc.aval;
+    renderAval();
+  }
   $('rain-mm').dispatchEvent(new Event('input'));
   $('rain-h').dispatchEvent(new Event('input'));
   updateRainInfo();
@@ -2812,13 +3043,15 @@ function cancelComparison() {
 async function runComparison() {
   if (state.run?.running || cmp.list.length < 2) return;
   const p0 = params();
-  const grid = currentGrid(p0);
+  const grid = currentGrid({ ...p0, avalFrame: cmp.list.some((sc) => sc.aval) && !!mainReceiver() });
   if (!grid) {
     prog.error('Choisissez d\'abord le lieu à étudier.');
     return;
   }
-  const saved = { rainMm: p0.rainMm, rainH: p0.rainH, amc: p0.amc };
+  const saved = { rainMm: p0.rainMm, rainH: p0.rainH, amc: p0.amc, aval: avalSettings().on };
   const list = cmp.list.map((sc) => ({ ...sc }));
+  // Même zone de calcul pour tous les scénarios : avec la rivière aval si l'un d'eux la met en crue.
+  state.forceAvalFrame = list.some((sc) => sc.aval);
   const mainG = mainStudyGauge();
   cmp.running = true;
   cmp.cancel = false;
@@ -2838,6 +3071,7 @@ async function runComparison() {
     }
   } finally {
     cmp.running = false;
+    state.forceAvalFrame = false;
     $('cmp-run').textContent = 'Lancer la comparaison';
     $('cmp-run').classList.remove('stop');
     applyScenario(saved);
@@ -2893,7 +3127,7 @@ async function collectScenario(run, sc, i, mainG) {
   return {
     label: sc.label,
     color: CMP_COLORS[i],
-    p: { rainMm: run.params.rainMm, rainH: run.params.rainH, amc: run.params.amc, capInf: !!run.params.capInf },
+    p: { rainMm: run.params.rainMm, rainH: run.params.rainH, amc: run.params.amc, capInf: !!run.params.capInf, avalQ: run.params.aval?.Q || 0 },
     m,
     id,
     saved: !!run.savedId,
@@ -2945,6 +3179,7 @@ function showCompareDock() {
   const rows = [
     ['Pluie', (s) => `${fmtNum(s.p.rainMm)} mm en ${fmtShort(s.p.rainH)} h<small>${fmtNum(s.p.rainMm / s.p.rainH, 1)} mm/h en moyenne</small>`],
     ['Sol', (s) => AMC_NAME[s.p.amc]],
+    ...(scs.some((s) => s.p.avalQ) ? [['Rivière aval', (s) => (s.p.avalQ ? `en crue<small>${fmtQ(s.p.avalQ)}</small>` : 'normale')]] : []),
     ['Pic de débit', (s) => `${fmtQ(s.m.qPeak)}<small>à ${fmtH(s.m.tPeak)}</small>`, (s) => s.m.qPeak],
     ['Volume écoulé', (s) => `${fmtVol(s.m.volume)}${s.m.share != null ? `<small>${fmtNum(Math.min(1, s.m.share) * 100)} % de la pluie</small>` : ''}`, (s) => s.m.volume],
     ['Inondé > 10 cm', (s) => fmtSurf(s.m.a10), (s) => s.m.a10],

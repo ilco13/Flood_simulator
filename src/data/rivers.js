@@ -285,6 +285,32 @@ function enforceDownstream(grid, z, paths, maxCarve) {
  * axe principal des sommets situés à moins de `radius` m du point le plus proche du tracé.
  * Plus robuste que le seul tronçon le plus proche dans un méandre.
  */
+/** Nom du cours d'eau BD TOPO nommé le plus proche (à moins de maxDist m), autre que `exclude`. */
+export function nearestRiverName(rivers, x, y, maxDist = 150, exclude = null) {
+  let best = null;
+  let bd = maxDist;
+  for (const f of rivers?.features || []) {
+    const name = f.properties.name;
+    if (!name || name === exclude || f.properties.underground || /canal/i.test(name)) continue;
+    for (const part of lineParts(f.geometry)) {
+      for (let s = 0; s < part.length - 1; s++) {
+        const [x0, y0] = part[s];
+        const [x1, y1] = part[s + 1];
+        const vx = x1 - x0;
+        const vy = y1 - y0;
+        const L2 = vx * vx + vy * vy;
+        const t = L2 ? Math.max(0, Math.min(1, ((x - x0) * vx + (y - y0) * vy) / L2)) : 0;
+        const d = Math.hypot(x0 + t * vx - x, y0 + t * vy - y);
+        if (d < bd) {
+          bd = d;
+          best = name;
+        }
+      }
+    }
+  }
+  return best;
+}
+
 export function riverDirectionAt(rivers, x, y, name, radius = 250) {
   let best = null;
   for (const f of rivers.features) {

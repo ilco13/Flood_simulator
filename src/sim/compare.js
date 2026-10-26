@@ -142,7 +142,18 @@ export function analyseComparison(scs, { areaKm2 }) {
   const vRain = differ((p) => p.rainMm);
   const vDur = differ((p) => p.rainH);
   const vAmc = differ((p) => p.amc);
-  if (vAmc && !vRain && !vDur) {
+  const vAval = differ((p) => p.avalQ || 0);
+  if (vAval && !vRain && !vDur && !vAmc) {
+    const lo = scs.reduce((a, b) => ((b.p.avalQ || 0) < (a.p.avalQ || 0) ? b : a));
+    const hi = scs.reduce((a, b) => ((b.p.avalQ || 0) > (a.p.avalQ || 0) ? b : a));
+    const dH = hi.m.hPlace - lo.m.hPlace;
+    let t = `Seul le débit de la rivière aval change (${lo.p.avalQ ? fmtQ(lo.p.avalQ) : 'pas de crue'} → ${fmtQ(hi.p.avalQ)}). `;
+    if (Math.abs(dH) >= 0.02 && Math.max(hi.m.hPlace, lo.m.hPlace) >= 0.05)
+      t += `Au point étudié, l'eau ${dH > 0 ? 'monte' : 'baisse'} de <strong>${fmtDepthC(Math.abs(dH))}</strong> (${fmtDepthC(lo.m.hPlace)} → ${fmtDepthC(hi.m.hPlace)})${dH > 0 ? ' : la rivière haute freine l\'écoulement du cours d\'eau étudié, dont l\'eau s\'accumule en amont de la confluence (remous)' : ''}. `;
+    else t += 'Au point étudié, le niveau ne change pas (moins de 2 cm) : le remous ne remonte pas jusque-là (confluence trop loin ou trop en contrebas). ';
+    t += `Surface inondée sur le bassin du cours d'eau : ${fmtSurf(lo.m.a10)} → ${fmtSurf(hi.m.a10)} ; débit de pointe au droit du lieu : ${fmtQ(lo.m.qPeak)} → ${fmtQ(hi.m.qPeak)}.`;
+    out.push(t);
+  } else if (vAmc && !vRain && !vDur) {
     const sorted = [...scs].sort((a, b) => a.p.amc - b.p.amc);
     const lo = sorted[0];
     const hi = sorted[sorted.length - 1];

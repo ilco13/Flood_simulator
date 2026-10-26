@@ -89,7 +89,7 @@ self.onmessage = async (e) => {
       return false;
     };
     const gauges = buildGauges(grid, rivers, gaugeDefs).filter(
-      (g) => !terrain.mask || String(g.id).startsWith('study') || Array.from(g.cells).some(nearMask),
+      (g) => !terrain.mask || String(g.id).startsWith('study') || g.id === 'aval' || Array.from(g.cells).some(nearMask),
     );
 
     const outline = terrain.mask ? outlineWgs(terrain.mask, grid) : [];

@@ -39,6 +39,24 @@
               </div>
               <ul id="catch-list" class="catch-list"></ul>
               <p id="catch-info" class="hint"></p>
+              <div id="aval-box" class="aval-box" hidden>
+                <h3>Rivière en aval</h3>
+                <p id="aval-desc" class="hint"></p>
+                <label class="check"><input type="checkbox" id="aval-on" /> Simuler la rivière en crue (remous à la confluence)</label>
+                <div id="aval-opts" class="row2" hidden>
+                  <label>Débit de la rivière
+                    <select id="aval-mode">
+                      <option value="q10">Crue décennale estimée</option>
+                      <option value="q100">Crue centennale estimée</option>
+                      <option value="custom">Autre valeur</option>
+                    </select>
+                  </label>
+                  <label>Débit (m³/s)
+                    <input id="aval-q" type="number" min="1" max="20000" step="1" inputmode="decimal" />
+                  </label>
+                </div>
+                <p id="aval-info" class="hint"></p>
+              </div>
             </div>
             <div id="obs-box">
               <span class="lbl">Ouvrages absents du relief</span>
@@ -112,10 +130,11 @@
             </div>
             <details id="compare-box" class="compare-box">
               <summary>Comparer plusieurs scénarios</summary>
-              <p class="hint">Même lieu, même maille : seules la pluie et l'humidité du sol changent. Les simulations sont lancées l'une après l'autre, puis comparées (courbes, tableau, analyse, carte des écarts).</p>
+              <p class="hint">Même lieu, même maille : seules la pluie, l'humidité du sol et la crue de la rivière aval changent. Les simulations sont lancées l'une après l'autre, puis comparées (courbes, tableau, analyse, carte des écarts).</p>
               <div class="btn-row wrap">
                 <button type="button" class="chip-btn" id="cmp-soil">Sol sec / normal / saturé</button>
                 <button type="button" class="chip-btn" id="cmp-rain">Orage 3 h / pluie 24 h</button>
+                <button type="button" class="chip-btn" id="cmp-aval" hidden>Rivière aval normale / en crue</button>
                 <button type="button" class="chip-btn" id="cmp-add">+ Réglage actuel</button>
               </div>
               <ol id="cmp-list" class="cmp-list"></ol>

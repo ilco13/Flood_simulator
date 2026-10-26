@@ -4,6 +4,7 @@
 
 import { G, H_MIN, FROUDE_MAX, V_MAX, BOUNDARY_SLOPE, THETA, stableDt } from './scheme.js';
 import { IA_RATIO, HORTON_P, NO_CAP } from '../hydrology/scs.js';
+import { inflowRate } from './cpuSolver.js';
 import { fluxFields } from './flux.js';
 
 const WG = 16;
@@ -16,7 +17,7 @@ struct Consts {
   hmin: f32, frmax: f32, vmax: f32, theta: f32,
   bslope: f32, ia: f32, p0: f32, p1: f32,
 };
-struct Step { dt: f32, t: f32, rain: f32, cumP: f32 };
+struct Step { dt: f32, t: f32, rain: f32, cumP: f32, qin: f32, pad0: f32, pad1: f32, pad2: f32 };
 @group(0) @binding(0) var<uniform> C: Consts;
 `;
 
@@ -241,8 +242,25 @@ export function gpuMaxCells(device) {
   return Math.floor(Math.min(device.limits.maxStorageBufferBindingSize, device.limits.maxBufferSize) / 4) - 1;
 }
 
+// Apport d'une rivière : hauteur P.qin ajoutée à chaque maille source à chaque pas.
+const INFLOW_WGSL = /* wgsl */ `${COMMON}
+@group(0) @binding(1) var<uniform> P: Step;
+@group(0) @binding(2) var<storage, read_write> h: array<f32>;
+@group(0) @binding(3) var<storage, read> src: array<u32>;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let m = gid.x;
+  if (m < arrayLength(&src)) {
+    let k = src[m];
+    h[k] = h[k] + P.qin;
+  }
+}
+`;
+
 export class GpuSolver {
-  constructor(device, { nx, ny, dx, z, S, manning, fc = null, m0 = 3 }, gauges) {
+  constructor(device, { nx, ny, dx, z, S, manning, fc = null, m0 = 3, inflow = null }, gauges) {
+    this.inflow = inflow?.cells?.length ? inflow : null;
     this.device = device;
     // Taille des lots de pas envoyés au GPU, ajustée pour qu'un lot dure ~40 ms (≈ 12 ms quand
     // l'utilisateur déplace la carte) : la carte garde la main pour s'afficher.
@@ -273,6 +291,7 @@ export class GpuSolver {
       ratio: mk(N * 4),
       n: mk(N * 4),
       S: mk(N * 8),
+      src: mk(Math.max(1, inflow?.cells?.length || 0) * 4),
       hmax: mk(N * 4),
       tmax: mk(N * 4),
       vmax: mk(N * 4),
@@ -304,6 +323,7 @@ export class GpuSolver {
       sfc[2 * k + 1] = fc ? fc[k] : NO_CAP;
     }
     q.writeBuffer(this.bufs.S, 0, sfc);
+    if (this.inflow) q.writeBuffer(this.bufs.src, 0, Uint32Array.from(this.inflow.cells));
 
     // Sections de contrôle
     const cells = [];
@@ -335,7 +355,7 @@ export class GpuSolver {
       entries: entries.map((type, binding) => {
         const e = { binding, visibility: GPUShaderStage.COMPUTE };
         if (type === 'u') e.buffer = { type: 'uniform' };
-        else if (type === 'ud') e.buffer = { type: 'uniform', hasDynamicOffset: true, minBindingSize: 16 };
+        else if (type === 'ud') e.buffer = { type: 'uniform', hasDynamicOffset: true, minBindingSize: 32 };
         else if (type === 'r') e.buffer = { type: 'read-only-storage' };
         else e.buffer = { type: 'storage' };
         return e;
@@ -353,7 +373,7 @@ export class GpuSolver {
   #buildPipelines() {
     const d = this.device;
     const b = this.bufs;
-    const stepBinding = { buffer: b.steps, offset: 0, size: 16 };
+    const stepBinding = { buffer: b.steps, offset: 0, size: 32 };
     const bg = (layout, list) =>
       d.createBindGroup({
         layout,
@@ -374,6 +394,18 @@ export class GpuSolver {
     this.scalePipe = this.#pipeline(SCALE_WGSL, scaleL);
     this.depthPipe = this.#pipeline(DEPTH_WGSL, depthL);
     this.gaugePipe = this.#pipeline(GAUGE_WGSL, gaugeL);
+    const inflowL = this.#layout(['u', 'ud', 'w', 'r']);
+    this.inflowPipe = this.#pipeline(INFLOW_WGSL, inflowL);
+    // Taille exacte : arrayLength() doit valoir le nombre de mailles sources (le tampon est arrondi).
+    this.inflowBG = d.createBindGroup({
+      layout: inflowL,
+      entries: [
+        { binding: 0, resource: { buffer: b.consts } },
+        { binding: 1, resource: stepBinding },
+        { binding: 2, resource: { buffer: b.h } },
+        { binding: 3, resource: { buffer: b.src, size: Math.max(1, this.inflow?.cells.length || 1) * 4 } },
+      ],
+    });
 
     this.fluxBG = [0, 1].map((p) =>
       bg(fluxL, [b.consts, stepBinding, b.z, b.h, b.qx[p], b.qy[p], b.qx[1 - p], b.qy[1 - p], b.n]),
@@ -413,6 +445,7 @@ export class GpuSolver {
         pf[o + 1] = t + dt;
         pf[o + 2] = (P1 - P0) / 1000;
         pf[o + 3] = 0.5 * (P0 + P1);
+        pf[o + 4] = this.inflow ? (inflowRate(this.inflow.Q, this.inflow.ramp, t + dt / 2) * dt) / (this.inflow.cells.length * this.dx * this.dx) : 0;
         t += dt;
         K++;
       }
@@ -435,6 +468,11 @@ export class GpuSolver {
         pass.setPipeline(this.depthPipe);
         pass.setBindGroup(0, this.depthBG[nxt], off);
         pass.dispatchWorkgroups(gx, gy);
+        if (this.inflow) {
+          pass.setPipeline(this.inflowPipe);
+          pass.setBindGroup(0, this.inflowBG, off);
+          pass.dispatchWorkgroups(Math.ceil(this.inflow.cells.length / 64));
+        }
         this.cur = nxt;
       }
       pass.end();

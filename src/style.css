@@ -1487,3 +1487,18 @@ details.advanced h3 {
     padding: 6px 8px;
   }
 }
+
+/* Rivière aval */
+.aval-box {
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-left: 4px solid #1971c2;
+  border-radius: 8px;
+  padding: 6px 10px 8px;
+}
+.aval-box h3 {
+  margin: 0 0 2px;
+}
+.aval-box .row2 {
+  margin-top: 4px;
+}

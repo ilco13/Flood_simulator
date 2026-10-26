@@ -30,11 +30,14 @@ function boundaryFlux(h, n) {
   return (Math.pow(h, 5 / 3) * Math.sqrt(BOUNDARY_SLOPE)) / n;
 }
 
+/** Débit d'apport (m³/s) au temps t : montée linéaire sur `ramp` secondes, puis constant. */
+export const inflowRate = (Q, ramp, t) => (ramp > 0 ? Q * Math.min(1, Math.max(0, t) / ramp) : Q);
+
 export class CpuSolver {
   /**
    * @param {object} p  { nx, ny, dx, z, S, manning }
    */
-  constructor({ nx, ny, dx, z, S, manning, fc = null, m0 = 3 }) {
+  constructor({ nx, ny, dx, z, S, manning, fc = null, m0 = 3, inflow = null }) {
     this.nx = nx;
     this.ny = ny;
     this.dx = dx;
@@ -42,6 +45,8 @@ export class CpuSolver {
     this.S = S;
     this.fc = fc; // capacité d'infiltration finale (m/s) ; null = pas de plafond
     this.m0 = m0;
+    // Apport d'une rivière (m³/s) réparti sur quelques mailles de son lit : { cells, Q, ramp }
+    this.inflow = inflow?.cells?.length ? inflow : null;
     this.n = manning;
     const N = nx * ny;
     this.h = new Float32Array(N);
@@ -172,6 +177,17 @@ export class CpuSolver {
       }
     }
     this.rainVolume += rain * dx * dx;
+    if (this.inflow) {
+      const { cells, Q, ramp } = this.inflow;
+      const q = inflowRate(Q, ramp, t - dt / 2);
+      const dh = (q * dt) / (cells.length * dx * dx);
+      for (let m = 0; m < cells.length; m++) {
+        const k = cells[m];
+        h[k] += dh;
+        if (h[k] > hm) hm = h[k];
+      }
+      this.rainVolume += q * dt;
+    }
     return hm;
   }
 

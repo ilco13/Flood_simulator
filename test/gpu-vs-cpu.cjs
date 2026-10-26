@@ -26,13 +26,15 @@ const { chromium } = require(process.env.PLAYWRIGHT || 'playwright');
         n[k] = j % 2 ? 0.04 : 0.08;
         fcap[k] = ((i % 3) + 1) * 4 / 3.6e6; // plafond d'infiltration 4 à 12 mm/h
       }
+    // Apport d'une rivière en amont : 8 m³/s sur 3 mailles du fond de la vallée
+    const inflow = { cells: Int32Array.from([31 * nx + 4, 32 * nx + 4, 33 * nx + 4]), Q: 8, ramp: 600 };
     const gauges = [{ cells: Int32Array.from({ length: 20 }, (_, m) => (22 + m) * nx + 80), wx: new Float32Array(20).fill(dx), wy: new Float32Array(20) }];
     const hyeto = makeHyetograph({ totalMm: 80, durationH: 1, shape: 'desbordes' });
     const opts = { hyeto, totalTime: 2 * 3600, gaugeEvery: 300, snapshotEvery: 3600 };
     const qc = [], qg = [];
-    const cpu = new CpuBackend({ nx, ny, dx, z, S, manning: n, fc: fcap, m0: 3 }, gauges);
+    const cpu = new CpuBackend({ nx, ny, dx, z, S, manning: n, fc: fcap, m0: 3, inflow }, gauges);
     const rc = await simulate(cpu, { ...opts, onGauge: (t, Q) => qc.push(Q[0]) });
-    const g = new GpuSolver(gpu.device, { nx, ny, dx, z, S, manning: n, fc: fcap, m0: 3 }, gauges);
+    const g = new GpuSolver(gpu.device, { nx, ny, dx, z, S, manning: n, fc: fcap, m0: 3, inflow }, gauges);
     const rg = await simulate(g, { ...opts, onGauge: (t, Q) => qg.push(Q[0]) });
     const hc = await cpu.readDepth(), hg = await g.readDepth();
     let dmax = 0, hmaxc = 0;
