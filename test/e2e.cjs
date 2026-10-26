@@ -94,12 +94,18 @@ async function runSite(browser, key) {
       if (!s?.helper) return null;
       let worst = 0;
       let simMax = 0;
-      for (let i = 0; i < s.sample.pts.length; i++) {
-        const p = s.sample.pts[i];
+      const pts = s.sample.pts;
+      const cell = window.floodApp.run.grid.dx;
+      const step = pts.length > 1 ? pts[1].d - pts[0].d : 1;
+      const r = Math.max(1, Math.round(cell / step));
+      for (let i = 0; i < pts.length; i++) {
         const inf = s.helper.info(i);
-        simMax = Math.max(simMax, p.hmax);
-        // Écart toléré : +30 cm ou +50 % (terrain fin plus bas que la maille), débordement d'une maille
-        worst = Math.max(worst, inf.maxDepth - (p.hmax + Math.max(0.3, 0.5 * p.hmax)));
+        simMax = Math.max(simMax, pts[i].hmax);
+        // Hauteur simulée de référence : la plus forte à moins d'une maille (le dessin peut
+        // déborder d'une maille sur le terrain fin plus bas) ; écart toléré +30 cm ou +50 %.
+        let h = 0;
+        for (let m = Math.max(0, i - r); m <= Math.min(pts.length - 1, i + r); m++) h = Math.max(h, pts[m].hmax);
+        worst = Math.max(worst, inf.maxDepth - (h + Math.max(0.3, 0.5 * h)));
       }
       return { worst, simMax };
     });

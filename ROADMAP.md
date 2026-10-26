@@ -20,15 +20,15 @@ Légende : `[x]` fait · `[ ]` à faire.
 - [x] Campagne de tests sur 14 cours d'eau en France
 - [x] Tests unitaires lancés avant chaque mise en ligne (GitHub Actions)
 
-## Étape 1 — Fondations et bâtiments (≈ 2 séances)
+## Étape 1 — Fondations et bâtiments (≈ 2 séances) ✅
 
 But : rendre le code plus sûr à faire évoluer, et corriger la plus grosse erreur en ville.
 
-- [ ] Découper `src/main.js` (≈ 3 500 lignes) en modules : lieu étudié, pluies, sol, calcul, résultats, coupe, comparaison, rivière aval
-- [ ] Tests navigateur de bout en bout dans le dépôt, sur 4 lieux de référence (Touloubre, Weiss, Roya, Torse + Arc) : surfaces de bassin, bilan de masse, arrêt après le pic, coupe
-- [ ] Bâtiments IGN automatiques (BD TOPO, avec leur hauteur) traités comme les bâtiments dessinés, option pour les désactiver
-- [ ] Ne pas boucher les rues entre bâtiments aux mailles grossières (bâti partiel par maille)
-- [ ] Vérifier : en zone urbaine, l'eau contourne les maisons ; une rue entre deux bâtiments reste ouverte à 5 m
+- [x] Découper `src/main.js` (≈ 3 500 lignes) en modules : lieu étudié, pluies, sol, calcul, résultats, coupe, comparaison, rivière aval
+- [x] Tests navigateur de bout en bout dans le dépôt, sur 4 lieux de référence (Touloubre, Weiss, Roya, Torse + Arc) : surfaces de bassin, bilan de masse, arrêt après le pic, coupe
+- [x] Bâtiments IGN automatiques (BD TOPO, avec leur hauteur) traités comme les bâtiments dessinés, option pour les désactiver
+- [x] Ne pas boucher les rues entre bâtiments aux mailles grossières (bâti partiel par maille)
+- [x] Vérifier : en zone urbaine, l'eau contourne les maisons ; une rue entre deux bâtiments reste ouverte — vérifié sur la Torse (Val Saint-André, maille 10 m) : 1 maille bâtie mouillée sur 3 534, 843 mailles de rue en eau
 
 ## Étape 2 — Vitesse (≈ 3 séances)
 
