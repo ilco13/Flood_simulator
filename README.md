@@ -86,6 +86,8 @@ Le workflow `.github/workflows/deploy.yml` publie `dist/` sur **GitHub Pages** �
 
 ## Pistes suivantes
 
+Feuille de route détaillée, avec les étapes cochées au fur et à mesure : [ROADMAP.md](ROADMAP.md).
+
 - Calage sur les stations Hydroportail de l'Arc et comparaison avec les emprises du PPRI / AZI.
 - Pluie spatialisée (lames d'eau radar Météo-France), scénarios de crues historiques.
 - Carte d'aléa (hauteur × vitesse), routes coupées, bâtiments touchés.
