@@ -176,7 +176,7 @@ function drawObstacles(ctx, { pts, soil, ground, kind, X, Y, pad, pw, ph }) {
     const i0 = i;
     while (i < n && kind[i] === k && Number.isFinite(soil[i])) i++;
     const i1 = i - 1;
-    if (k === 1) {
+    if (k === 1 || k === 3) {
       ctx.beginPath();
       ctx.moveTo(X(pts[i0].d), Y(soil[i0]));
       for (let m = i0; m <= i1; m++) ctx.lineTo(X(pts[m].d), Y(ground[m]));

@@ -6,7 +6,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node test/run-tests.mjs"
+    "test": "node test/check-imports.mjs && node test/run-tests.mjs",
+    "e2e": "node test/e2e.cjs"
   },
   "repository": {
     "type": "git",

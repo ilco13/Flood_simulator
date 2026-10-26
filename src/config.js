@@ -25,6 +25,7 @@ export const LAYERS = {
   // Millésime précédent : complète les zones pas encore couvertes (ex. partie varoise).
   landcoverFallback: ['IGNF_COSIA_2021-2023', 'IGNF_COSIA_2017-2020'],
   rivers: 'BDTOPO_V3:troncon_hydrographique',
+  buildings: 'BDTOPO_V3:batiment',
 };
 
 export const PLAN_IGN_STYLE =

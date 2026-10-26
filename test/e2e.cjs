@@ -1,66 +1,137 @@
-// Test de bout en bout dans Chromium : chargement, simulation sur une petite zone, captures.
-// Usage : node test/e2e.cjs <url> <dossier de sortie> [zone=view|basin] [res]
+// Tests de bout en bout dans Chromium, sur des lieux de référence en France.
+// Prérequis : application construite et servie (npm run build && npx vite preview --port 4173),
+// accès réseau aux services IGN et Météo-France.
+// Usage : node test/e2e.cjs [url] [lieux séparés par des virgules] [dossier des captures]
+// Vérifie : surface du bassin, fin du calcul (arrêt après le pic), bilan de masse, débits,
+// cohérence de la coupe avec la simulation, rivière aval (débit sous la confluence).
 const { chromium } = require(process.env.PLAYWRIGHT || 'playwright');
-const [url = 'http://localhost:4173/', outDir = '.', zone = 'view', res = '10', mm = '120', hours = '3', tail = '2', engine = 'auto'] =
-  process.argv.slice(2);
-(async () => {
-  // Proxy éventuel de l'environnement (sans passer par l'option de Playwright, qui force
-  // aussi localhost à passer par le proxy).
-  const proxyArgs = process.env.HTTPS_PROXY
-    ? [`--proxy-server=${process.env.HTTPS_PROXY}`, '--proxy-bypass-list=localhost;127.0.0.1']
-    : [];
-  const browser = await chromium.launch({
-    channel: 'chromium',
-    args: [
-      ...proxyArgs,'--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-angle=swiftshader', '--use-webgpu-adapter=swiftshader', '--enable-unsafe-swiftshader'],
-  });
-  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+
+const SITES = {
+  // Surfaces de référence : Hub'Eau (stations) ; Torse : surface mesurée par l'application.
+  touloubre: { name: 'Touloubre à la Barben', lon: 5.175488, lat: 43.628894, area: 212.2, river: 'Touloubre', res: '50' },
+  weiss: { name: 'Weiss à Orbey', lon: 7.161617, lat: 48.126926, area: 33.6, river: 'Weiss', res: '25' },
+  roya: { name: 'Roya à Fontan', lon: 7.554355, lat: 44.002656, area: 299, river: 'Roya', res: '50' },
+  torse: { name: 'Torse à Aix (Arc en aval)', lon: 5.4672, lat: 43.518, area: 20.7, river: 'Torse', res: '25', aval: { river: 'Arc', minAreaKm2: 250 } },
+};
+
+const [url = 'http://localhost:4173/', which = Object.keys(SITES).join(','), outDir = ''] = process.argv.slice(2);
+const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+
+async function runSite(browser, key) {
+  const site = SITES[key];
+  const checks = [];
+  const check = (ok, what) => checks.push({ ok: !!ok, what });
+  const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
   const errors = [];
-  page.on('console', (m) => {
-    if (m.type() === 'error' || m.type() === 'warning') console.log(`[${m.type()}]`, m.text().slice(0, 300));
-  });
-  page.on('pageerror', (e) => errors.push(e.message));
-  await page.goto(url);
-  await page.waitForFunction(() => document.querySelector('#res option'), null, { timeout: 180000 });
-  await page.waitForTimeout(4000);
-  await page.screenshot({ path: `${outDir}/01-accueil.png` });
-  console.log('moteur :', await page.textContent('#engine-info'));
-  await page.click('details summary');
-  await page.selectOption('#engine', engine);
-  await page.selectOption('#zone', zone);
-  await page.selectOption('#res', res);
-  await page.fill('#rain-mm', mm);
-  await page.fill('#rain-h', hours);
-  await page.fill('#tail-h', tail);
-  await page.dispatchEvent('#rain-h', 'input');
-  console.log('résolution :', (await page.textContent('#res-info')).trim());
-  const t0 = Date.now();
-  await page.click('#run');
-  let last = '';
-  for (;;) {
-    await page.waitForTimeout(3000);
-    const st = await page.textContent('#progress .status');
-    if (st !== last) console.log(`${((Date.now() - t0) / 1000).toFixed(0)} s : ${st}`);
-    last = st;
-    if (/Terminé|Erreur|arrêtée/.test(st)) break;
-    if (Date.now() - t0 > 20 * 60000) break;
+  page.on('pageerror', (e) => errors.push(e.message.slice(0, 200)));
+  try {
+    await page.goto(url);
+    for (let i = 0; i < 90 && !(await page.evaluate(() => !!window.floodApp?.ctrl3d)); i++) await page.waitForTimeout(1000);
+    await page.evaluate(() => localStorage.clear());
+    await page.evaluate(([lon, lat]) => window.floodApp.map.jumpTo({ center: [lon, lat], zoom: 15 }), [site.lon, site.lat]);
+    await page.waitForTimeout(1500);
+    await page.click('#catch-pick');
+    const xy = await page.evaluate(([lon, lat]) => window.floodApp.map.project([lon, lat]), [site.lon, site.lat]);
+    const box = await page.locator('#map').boundingBox();
+    await page.mouse.click(box.x + xy.x, box.y + xy.y);
+    for (let i = 0; i < 150; i++) {
+      await page.waitForTimeout(2000);
+      if (await page.evaluate(() => !window.floodApp.catchWorker && !!window.floodApp.study)) break;
+    }
+    const cands = await page.evaluate(() => window.floodApp.study.cands.map((c) => ({ name: c.name, kind: c.kind, area: c.areaKm2, receiver: c.receiver && { name: c.receiver.name, area: c.receiver.areaKm2 } })));
+    const main = cands.find((c) => c.kind === 'stream' && norm(c.name).includes(norm(site.river)));
+    check(main, `cours d'eau « ${site.river} » trouvé`);
+    const ratio = main ? main.area / site.area : 0;
+    check(ratio > 0.85 && ratio < 1.2, `surface du bassin ${main ? main.area.toFixed(1) : '?'} km² (référence ${site.area}, rapport ${ratio.toFixed(2)})`);
+    if (site.aval) {
+      const r = main?.receiver;
+      check(r && norm(r.name).includes(norm(site.aval.river)) && r.area >= site.aval.minAreaKm2, `rivière aval ${r ? `${r.name}, ${r.area.toFixed(0)} km²` : 'non trouvée'}`);
+      await page.check('#aval-on');
+    }
+    // Simulation : 80 mm en 3 h, maille grossière, arrêt après le pic
+    await page.fill('#rain-mm', '80');
+    await page.fill('#rain-h', '3');
+    await page.dispatchEvent('#rain-h', 'input');
+    await page.selectOption('#res', site.res);
+    await page.dispatchEvent('#res', 'input');
+    await page.click('#run');
+    for (let i = 0; i < 900; i++) {
+      await page.waitForTimeout(2000);
+      if (/Terminé|Arrêtée|rreur/.test(await page.textContent('#map-status'))) break;
+    }
+    const status = await page.textContent('#map-status');
+    check(/pic de crue passé/.test(status), `fin du calcul : ${status.trim()}`);
+    const res = await page.evaluate(() => {
+      const a = window.floodApp;
+      const run = a.run;
+      const mass = /Bilan de masse : erreur ([-\d,]+) %/.exec(document.querySelector('#summary').textContent)?.[1];
+      let hmax = 0;
+      for (const v of run.maxima.hmax) if (v > hmax) hmax = v;
+      return {
+        mass: mass == null ? null : Number(mass.replace(',', '.')),
+        hmax,
+        gauges: run.gauges.map((g, i) => ({ id: g.id, name: g.name, peak: run.series[i].reduce((m, p) => Math.max(m, p[1]), 0) })),
+        avalQ: run.params.aval?.Q ?? null,
+      };
+    });
+    check(res.mass == null || Math.abs(res.mass) < 0.01, `bilan de masse ${res.mass ?? 'non mesuré (GPU)'} %`);
+    check(Number.isFinite(res.hmax) && res.hmax > 0.1 && res.hmax < 30, `hauteur maximale ${res.hmax.toFixed(2)} m`);
+    const g0 = res.gauges.find((g) => g.id.startsWith('study') && norm(g.name).includes(norm(site.river)));
+    check(g0 && g0.peak > 1, `débit au droit du lieu ${g0 ? g0.peak.toFixed(1) : '?'} m³/s`);
+    if (site.aval) {
+      const ga = res.gauges.find((g) => g.id === 'aval');
+      check(ga && res.avalQ && ga.peak > 0.95 * res.avalQ, `rivière aval : ${ga ? ga.peak.toFixed(0) : '?'} m³/s sous la confluence pour ${res.avalQ} injectés`);
+    }
+    // Coupe au lieu : la hauteur dessinée reste proche de la hauteur simulée
+    await page.click('#section-place');
+    const xy2 = await page.evaluate(([lon, lat]) => window.floodApp.map.project([lon, lat]), [site.lon, site.lat]);
+    await page.mouse.click(box.x + xy2.x, box.y + xy2.y);
+    await page.waitForTimeout(2500);
+    await page.click('#show-max');
+    await page.waitForTimeout(2500);
+    const sec = await page.evaluate(() => {
+      const s = window.floodApp.section;
+      if (!s?.helper) return null;
+      let worst = 0;
+      let simMax = 0;
+      for (let i = 0; i < s.sample.pts.length; i++) {
+        const p = s.sample.pts[i];
+        const inf = s.helper.info(i);
+        simMax = Math.max(simMax, p.hmax);
+        // Écart toléré : +30 cm ou +50 % (terrain fin plus bas que la maille), débordement d'une maille
+        worst = Math.max(worst, inf.maxDepth - (p.hmax + Math.max(0.3, 0.5 * p.hmax)));
+      }
+      return { worst, simMax };
+    });
+    check(sec && sec.worst < 1.0, `coupe : excès de hauteur dessinée ${sec ? sec.worst.toFixed(2) : '?'} m (max simulé ${sec ? sec.simMax.toFixed(2) : '?'} m)`);
+    if (outDir) await page.screenshot({ path: `${outDir}/${key}.png` });
+  } catch (e) {
+    check(false, `erreur : ${String(e.message || e).slice(0, 200)}`);
   }
-  await page.waitForTimeout(1500);
-  await page.screenshot({ path: `${outDir}/02-fin.png` });
-  console.log('résumé :', (await page.innerText('#summary')).slice(0, 1200));
-  // Vue du maximum
-  await page.click('#view-mode button[data-v="max"]');
-  await page.waitForTimeout(1500);
-  await page.screenshot({ path: `${outDir}/03-max.png` });
-  // Clic sur la carte au centre
-  await page.mouse.click(820, 400);
-  await page.waitForTimeout(2500);
-  console.log('sonde :', await page.innerText('#probe-info'));
-  await page.screenshot({ path: `${outDir}/04-sonde.png` });
-  // Mobile
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.waitForTimeout(1500);
-  await page.screenshot({ path: `${outDir}/05-mobile.png` });
-  console.log(errors.length ? `ERREURS : ${errors.join(' | ')}` : 'aucune erreur de page');
+  check(!errors.length, `erreurs JavaScript : ${errors.length ? errors.join(' | ') : 'aucune'}`);
+  await page.close();
+  return checks;
+}
+
+(async () => {
+  const proxyArgs = process.env.HTTPS_PROXY ? [`--proxy-server=${process.env.HTTPS_PROXY}`, '--proxy-bypass-list=localhost;127.0.0.1'] : [];
+  const browser = await chromium.launch({ args: proxyArgs });
+  let failed = 0;
+  for (const key of which.split(',')) {
+    if (!SITES[key]) {
+      console.log(`lieu inconnu : ${key}`);
+      failed++;
+      continue;
+    }
+    const t0 = Date.now();
+    const checks = await runSite(browser, key);
+    console.log(`\n${SITES[key].name} (${Math.round((Date.now() - t0) / 1000)} s)`);
+    for (const c of checks) {
+      console.log(`  ${c.ok ? 'ok  ' : 'ÉCHEC'} ${c.what}`);
+      if (!c.ok) failed++;
+    }
+  }
   await browser.close();
+  console.log(failed ? `\n${failed} vérification(s) en échec` : '\nTous les lieux de référence passent.');
+  process.exit(failed ? 1 : 0);
 })();

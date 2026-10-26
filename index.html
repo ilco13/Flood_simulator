@@ -61,8 +61,15 @@
             <div id="obs-box">
               <span class="lbl">Ouvrages absents du relief</span>
               <p class="hint">
-                Le relief LiDAR est un modèle du sol nu : bâtiments et murs n'y figurent pas. Dessinez ceux qui
-                comptent pour l'écoulement : l'eau devra les contourner ou passer par-dessus.
+                Le relief LiDAR est un modèle du sol nu : bâtiments et murs n'y figurent pas.
+              </p>
+              <label class="check">
+                <input type="checkbox" id="bati-ign" checked />
+                Bâtiments IGN (BD TOPO, avec leur hauteur) à moins d'1 km du lieu
+              </label>
+              <p class="hint">
+                Dessinez en plus les murs, et les bâtiments trop récents pour la BD TOPO : l'eau devra les contourner
+                ou passer par-dessus.
               </p>
               <div class="btn-row">
                 <button id="obs-building" class="ghost" type="button">+ Bâtiment</button>
@@ -330,7 +337,7 @@
                 <span><i class="sw-max"></i>Niveau maximal</span>
                 <span id="sec-runoff"><i class="sw-runoff"></i>Ruissellement (1–10 cm)</span>
                 <span><i class="sw-soil"></i>Terrain LiDAR HD</span>
-                <span id="sec-obs" hidden><i class="sw-bldg"></i>Bâtiment / <i class="sw-wall"></i>mur ajoutés</span>
+                <span id="sec-obs" hidden><i class="sw-bldg"></i>Bâtiment / <i class="sw-wall"></i>mur</span>
               </div>
             </div>
           </div>

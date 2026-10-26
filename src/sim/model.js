@@ -1,6 +1,6 @@
 // Préparation des entrées du modèle à partir des données brutes.
 
-import { burnRivers, riverDirectionAt, rasterizeLine } from '../data/rivers.js';
+import { burnRivers, riverDirectionAt, rasterizeLine, isBurnable } from '../data/rivers.js';
 import { drainageLabels, basinMask, accumulation, upstreamMask, flowDirections } from '../hydrology/terrain.js';
 import { buildRunoffFields, hortonM0 } from '../hydrology/scs.js';
 import { cellOf } from '../geo.js';
@@ -9,11 +9,20 @@ import { cellOf } from '../geo.js';
  * Prétraitements indépendants de la pluie : gravure du réseau, bassin versant.
  * @returns {{ z: Float32Array, mask: Uint8Array, basinCells: number, burned: number, breached: number }}
  */
-export function prepareTerrain({ grid, dem, rivers, burnDepth, outlet, upstreamOf, obstacles }) {
+export function prepareTerrain({ grid, dem, rivers, burnDepth, outlet, upstreamOf, obstacles, buildings }) {
   const z = dem.slice();
   const burned = rivers && burnDepth > 0 ? burnRivers(grid, z, rivers, burnDepth) : 0;
   // Ouvrages dessinés par l'utilisateur (absents du MNT, qui est un modèle du sol nu).
-  const protect = obstacles?.length ? applyObstacles(grid, z, obstacles) : null;
+  let protect = obstacles?.length ? applyObstacles(grid, z, obstacles) : null;
+  // Bâtiments BD TOPO : mailles bâties à plus de moitié relevées ; les autres gardent le
+  // passage, avec un frottement accru (renvoyé dans bldFrac).
+  let bld = null;
+  if (buildings?.length) {
+    bld = applyBuildings(grid, z, buildings, rivers);
+    if (!protect) protect = bld.protect;
+    else for (let k = 0; k < protect.length; k++) protect[k] |= bld.protect[k];
+  }
+  const extra = bld ? { bldFrac: bld.frac, bldCells: bld.cells, bldCount: buildings.length } : {};
   const { label, breached, parent, order, filled } = drainageLabels(z, grid.nx, grid.ny, {
     maxDepth: Math.max(2, 0.3 * grid.dx),
     maxLength: Math.max(4, Math.round(300 / grid.dx)),
@@ -54,10 +63,85 @@ export function prepareTerrain({ grid, dem, rivers, burnDepth, outlet, upstreamO
     if (mask) {
       basinCells = 0;
       for (let n = 0; n < mask.length; n++) basinCells += mask[n];
-      return { z, mask, basinCells, burned, breached, outletK: outletKs[0], outletKs, acc };
+      return { z, mask, basinCells, burned, breached, outletK: outletKs[0], outletKs, acc, ...extra };
     }
   }
-  return { z, mask, basinCells, burned, breached };
+  return { z, mask, basinCells, burned, breached, ...extra };
+}
+
+/** Part bâtie de chaque maille (0–1) et hauteur du plus haut bâtiment qui la couvre. */
+export function buildingCoverage(grid, buildings) {
+  const { nx, ny, dx, xmin, ymax } = grid;
+  // Sous-maillage d'environ 1 m (au plus 8 × 8 points par maille)
+  const f = Math.max(1, Math.min(8, Math.round(dx)));
+  const s = dx / f;
+  const W = nx * f;
+  const H = ny * f;
+  const cnt = new Uint16Array(nx * ny);
+  const hmax = new Float32Array(nx * ny);
+  for (const b of buildings) {
+    let y0 = Infinity;
+    let y1 = -Infinity;
+    for (const ring of b.rings)
+      for (const [, y] of ring) {
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+    const r0 = Math.max(0, Math.floor((ymax - y1) / s));
+    const r1 = Math.min(H - 1, Math.ceil((ymax - y0) / s));
+    for (let r = r0; r <= r1; r++) {
+      const yc = ymax - (r + 0.5) * s;
+      const xs = [];
+      for (const ring of b.rings)
+        for (let a = 0, c = ring.length - 1; a < ring.length; c = a++) {
+          const [xa, ya] = ring[a];
+          const [xb, yb] = ring[c];
+          if ((ya > yc) !== (yb > yc)) xs.push(xa + ((yc - ya) * (xb - xa)) / (yb - ya));
+        }
+      if (xs.length < 2) continue;
+      xs.sort((u, v) => u - v);
+      const j = Math.floor(r / f);
+      for (let m = 0; m + 1 < xs.length; m += 2) {
+        const c0 = Math.max(0, Math.ceil((xs[m] - xmin) / s - 0.5));
+        const c1 = Math.min(W - 1, Math.floor((xs[m + 1] - xmin) / s - 0.5));
+        for (let c = c0; c <= c1; c++) {
+          const k = j * nx + Math.floor(c / f);
+          cnt[k]++;
+          if (b.h > hmax[k]) hmax[k] = b.h;
+        }
+      }
+    }
+  }
+  const frac = new Float32Array(nx * ny);
+  const inv = 1 / (f * f);
+  for (let k = 0; k < frac.length; k++) frac[k] = Math.min(1, cnt[k] * inv);
+  return { frac, hmax };
+}
+
+/**
+ * Relève les mailles bâties à plus de moitié (hauteur du bâtiment, 15 m au plus), sauf celles
+ * d'un cours d'eau BD TOPO (rivière couverte, passage sous un bâtiment).
+ */
+export function applyBuildings(grid, z, buildings, rivers) {
+  const { frac, hmax } = buildingCoverage(grid, buildings);
+  const river = new Uint8Array(z.length);
+  for (const f of rivers?.features || []) {
+    if (!isBurnable(f)) continue;
+    const g = f.geometry;
+    const parts = g.type === 'MultiLineString' ? g.coordinates : g.type === 'LineString' ? [g.coordinates] : [];
+    for (const part of parts) rasterizeLine(grid, part, (k) => (river[k] = 1));
+  }
+  const protect = new Uint8Array(z.length);
+  let cells = 0;
+  for (let k = 0; k < z.length; k++) {
+    if (frac[k] >= 0.5 && !river[k]) {
+      z[k] += Math.min(15, hmax[k]);
+      protect[k] = 1;
+      frac[k] = 1;
+      cells++;
+    } else if (river[k]) frac[k] = 0;
+  }
+  return { frac, protect, cells };
 }
 
 /**
@@ -257,5 +341,8 @@ export function buildModel({ grid, terrain, classes, spc = 1, soilGroup, amc, ra
     spc,
     capInfiltration,
   );
+  // Mailles partiellement bâties (rues étroites à maille grossière) : passage gardé, frottement accru.
+  const bf = terrain.bldFrac;
+  if (bf) for (let k = 0; k < manning.length; k++) if (bf[k] > 0 && bf[k] < 1) manning[k] += 0.2 * bf[k];
   return { nx: grid.nx, ny: grid.ny, dx: grid.dx, z: terrain.z, S, manning, fc, m0: hortonM0(amc) };
 }

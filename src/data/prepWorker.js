@@ -4,6 +4,7 @@
 import { LAYERS } from '../config.js';
 import { fetchFloatGrid, fetchRgbaGrid } from './wms.js';
 import { fetchRivers } from './rivers.js';
+import { fetchBuildings } from './buildings.js';
 import { classifyRgba, classFractions } from '../hydrology/landcover.js';
 import { prepareTerrain, buildGauges, landcoverOversampling, regroupSamples } from '../sim/model.js';
 import { outlineWgs } from './outline.js';
@@ -19,7 +20,7 @@ function geomToWgs(g) {
 const post = (type, data, transfer) => self.postMessage({ type, ...data }, transfer || []);
 
 self.onmessage = async (e) => {
-  const { grid, burnDepth, outlet, upstreamOf, obstacles, gauges: gaugeDefs } = e.data;
+  const { grid, burnDepth, outlet, upstreamOf, obstacles, gauges: gaugeDefs, buildingsBox } = e.data;
   try {
     const last = {};
     const step = (key, p, detail) => {
@@ -65,7 +66,14 @@ self.onmessage = async (e) => {
       step('rivers', 1);
       return { type: 'FeatureCollection', features: [] };
     });
-    const [dem, rgba, rivers] = await Promise.all([demP, lcP, rivP]);
+    const bldP = buildingsBox
+      ? fetchBuildings(buildingsBox).catch((err) => {
+          console.warn('Bâtiments BD TOPO indisponibles', err);
+          warnings.push('bâtiments BD TOPO indisponibles (seuls les ouvrages dessinés sont pris en compte)');
+          return null;
+        })
+      : Promise.resolve(null);
+    const [dem, rgba, rivers, buildings] = await Promise.all([demP, lcP, rivP, bldP]);
 
     step('prep', 0.1);
     const sub = classifyRgba(rgba, N * f * f);
@@ -73,7 +81,7 @@ self.onmessage = async (e) => {
     const classes = regroupSamples(sub, grid, f);
 
     step('prep', 0.4);
-    const terrain = prepareTerrain({ grid, dem, rivers, burnDepth, outlet, upstreamOf, obstacles });
+    const terrain = prepareTerrain({ grid, dem, rivers, burnDepth, outlet, upstreamOf, obstacles, buildings });
     // Points de suivi : seulement ceux qui coupent le bassin simulé.
     // Ceux du lieu étudié sont toujours gardés (leur ligne de mesure est à l'exutoire, juste
     // à l'aval du bassin) ; les points de l'Arc seulement s'ils touchent le bassin simulé.
@@ -111,6 +119,7 @@ self.onmessage = async (e) => {
 
     const transfer = [dem.buffer, classes.buffer, terrain.z.buffer];
     if (terrain.mask) transfer.push(terrain.mask.buffer);
+    if (terrain.bldFrac) transfer.push(terrain.bldFrac.buffer);
     post(
       'done',
       {
@@ -122,6 +131,9 @@ self.onmessage = async (e) => {
         mask: terrain.mask,
         basinCells: terrain.basinCells,
         burned: terrain.burned,
+        bldFrac: terrain.bldFrac || null,
+        bldCells: terrain.bldCells || 0,
+        bldCount: terrain.bldCount || 0,
         gauges,
         outline,
         warnings: [...new Set(warnings)],
