@@ -9,6 +9,26 @@ const files = ['main.js', ...readdirSync(new URL('app/', root)).filter((f) => f.
 
 const topLevel = new Map(); // nom -> fichier
 const asts = new Map();
+// Noms exportés par les autres fichiers de src/ (calcul, données, rendu…) : un module qui les
+// utilise doit aussi les importer.
+function scanExports(dir) {
+  for (const ent of readdirSync(new URL(dir, root), { withFileTypes: true })) {
+    const rel = `${dir}${ent.name}`;
+    if (ent.isDirectory()) {
+      if (rel !== 'app') scanExports(`${rel}/`);
+      continue;
+    }
+    if (!ent.name.endsWith('.js') || rel === 'main.js') continue;
+    const ast = parseAst(readFileSync(new URL(rel, root), 'utf8'));
+    for (const node of ast.body) {
+      if (node.type !== 'ExportNamedDeclaration' || !node.declaration) continue;
+      const d = node.declaration;
+      if (d.id) topLevel.set(d.id.name, rel);
+      if (d.type === 'VariableDeclaration') for (const v of d.declarations) if (v.id.type === 'Identifier') topLevel.set(v.id.name, rel);
+    }
+  }
+}
+scanExports('');
 for (const f of files) {
   const ast = parseAst(readFileSync(new URL(f, root), 'utf8'));
   asts.set(f, ast);

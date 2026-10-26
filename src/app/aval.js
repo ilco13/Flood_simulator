@@ -1,5 +1,6 @@
 import { cellOf } from '../geo.js';
 import { floodQuantiles } from '../hydrology/flood.js';
+import { cmp } from './compareUi.js';
 import { $, fmtArea, fmtNum, state } from './core.js';
 import { describeRes } from './params.js';
 import { autoResForStudy, renderStudy, saveStudy, showStudy, studyCands } from './study.js';

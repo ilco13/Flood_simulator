@@ -1,4 +1,4 @@
-import { PALETTES, SCALES, buildLut, flowLegendStops, legendStops } from '../render/water.js';
+import { PALETTES, RUNOFF, SCALES, buildLut, flowLegendStops, legendStops } from '../render/water.js';
 import { SHAPES } from '../hydrology/rain.js';
 import { cacheClear } from '../data/cache.js';
 import { importRun } from '../data/runStore.js';
