@@ -23,7 +23,8 @@ export const mapReady = new Promise((r) => (resolveMapReady = r));
 
 export function runName(p, partial, place) {
   const where = place || (p.zone === 'basin' ? 'Haute vallée de l\'Arc' : 'Zone affichée');
-  return `${where} · ${fmtShort(p.rainMm)} mm en ${fmtShort(p.rainH)} h · ${AMC_LABEL[p.amc]}${p.aval ? ` · rivière aval ${fmtNum(p.aval.Q)} m³/s` : ''} · ${p.res} m${partial ? ' (partielle)' : ''}`;
+  const mesh = p.nestOf ? `${p.res} m autour du lieu (bassin à ${p.nestOf.coarse} m)` : `${p.res} m`;
+  return `${where} · ${fmtShort(p.rainMm)} mm en ${fmtShort(p.rainH)} h · ${AMC_LABEL[p.amc]}${p.aval ? ` · rivière aval ${fmtNum(p.aval.Q)} m³/s` : ''} · ${mesh}${partial ? ' (partielle)' : ''}`;
 }
 
 /**

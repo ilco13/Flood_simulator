@@ -120,6 +120,7 @@ self.onmessage = async (e) => {
     const transfer = [dem.buffer, classes.buffer, terrain.z.buffer];
     if (terrain.mask) transfer.push(terrain.mask.buffer);
     if (terrain.bldFrac) transfer.push(terrain.bldFrac.buffer);
+    if (terrain.channel) transfer.push(terrain.channel.buffer);
     post(
       'done',
       {
@@ -132,6 +133,7 @@ self.onmessage = async (e) => {
         basinCells: terrain.basinCells,
         burned: terrain.burned,
         bldFrac: terrain.bldFrac || null,
+        channel: terrain.channel || null,
         bldCells: terrain.bldCells || 0,
         bldCount: terrain.bldCount || 0,
         gauges,

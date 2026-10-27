@@ -111,9 +111,30 @@
 
           <section>
             <h2>Calcul</h2>
-            <label>Maille de calcul
+            <label><span id="res-label">Maille de calcul</span>
               <select id="res"></select>
             </label>
+            <label class="check">
+              <input type="checkbox" id="nest-on" />
+              Maille fine autour du lieu (calcul en deux temps)
+            </label>
+            <div id="nest-opts" class="row2" hidden>
+              <label>Zone fine
+                <select id="nest-r">
+                  <option value="500">1 × 1 km</option>
+                  <option value="1000" selected>2 × 2 km</option>
+                  <option value="1500">3 × 3 km</option>
+                </select>
+              </label>
+              <label>Maille fine
+                <select id="nest-res">
+                  <option value="1">1 m</option>
+                  <option value="2" selected>2 m</option>
+                  <option value="5">5 m</option>
+                  <option value="10">10 m</option>
+                </select>
+              </label>
+            </div>
             <p id="res-info" class="hint"></p>
             <label class="check">
               <input type="checkbox" id="stop-peak" checked />

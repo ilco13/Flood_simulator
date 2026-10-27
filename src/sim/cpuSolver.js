@@ -33,11 +33,61 @@ function boundaryFlux(h, n) {
 /** Débit d'apport (m³/s) au temps t : montée linéaire sur `ramp` secondes, puis constant. */
 export const inflowRate = (Q, ramp, t) => (ramp > 0 ? Q * Math.min(1, Math.max(0, t) / ramp) : Q);
 
+/**
+ * Apports d'eau (m³/s) répartis sur des mailles : rivière aval, entrées d'une zone fine.
+ * Format : [{ cells, t: [s…], Q: [m³/s…] }] (débit interpolé linéairement, constant au-delà).
+ * L'ancien format { cells, Q, ramp } (montée linéaire puis constant) est accepté.
+ */
+export function normalizeSources({ sources, inflow }) {
+  const out = [];
+  for (const s of sources || []) if (s?.cells?.length && s.t?.length) out.push(s);
+  if (inflow?.cells?.length) out.push({ cells: inflow.cells, t: [0, Math.max(1, inflow.ramp || 0), 1e12], Q: [0, inflow.Q, inflow.Q] });
+  return out;
+}
+
+/** Débit d'une source au temps t (interpolation linéaire). */
+export function sourceRate(s, t) {
+  const { t: ts, Q } = s;
+  const n = ts.length;
+  if (t <= ts[0]) return Q[0];
+  if (t >= ts[n - 1]) return Q[n - 1];
+  let lo = 0;
+  let hi = n - 1;
+  while (hi - lo > 1) {
+    const m = (lo + hi) >> 1;
+    if (ts[m] <= t) lo = m;
+    else hi = m;
+  }
+  const f = (t - ts[lo]) / (ts[hi] - ts[lo]);
+  return Q[lo] + f * (Q[hi] - Q[lo]);
+}
+
+/** Mailles de toutes les sources à la suite, et débit par maille (m/s de hauteur) au temps t. */
+export function flattenSources(sources) {
+  let n = 0;
+  for (const s of sources) n += s.cells.length;
+  const cells = new Int32Array(n);
+  const owner = new Int32Array(n);
+  let o = 0;
+  sources.forEach((s, i) => {
+    cells.set(s.cells, o);
+    owner.fill(i, o, o + s.cells.length);
+    o += s.cells.length;
+  });
+  return { cells, owner };
+}
+
+export function sourceDepthRates(sources, flat, t, dx, out) {
+  const per = sources.map((s) => Math.max(0, sourceRate(s, t)) / (s.cells.length * dx * dx));
+  for (let m = 0; m < flat.cells.length; m++) out[m] = per[flat.owner[m]];
+  return out;
+}
+
 export class CpuSolver {
   /**
    * @param {object} p  { nx, ny, dx, z, S, manning }
    */
-  constructor({ nx, ny, dx, z, S, manning, fc = null, m0 = 3, inflow = null }) {
+  constructor({ nx, ny, dx, z, S, manning, fc = null, m0 = 3, inflow = null, sources = null }) {
     this.nx = nx;
     this.ny = ny;
     this.dx = dx;
@@ -46,7 +96,9 @@ export class CpuSolver {
     this.fc = fc; // capacité d'infiltration finale (m/s) ; null = pas de plafond
     this.m0 = m0;
     // Apport d'une rivière (m³/s) réparti sur quelques mailles de son lit : { cells, Q, ramp }
-    this.inflow = inflow?.cells?.length ? inflow : null;
+    this.sources = normalizeSources({ sources, inflow });
+    this.flat = this.sources.length ? flattenSources(this.sources) : null;
+    this.rates = this.flat ? new Float32Array(this.flat.cells.length) : null;
     this.n = manning;
     const N = nx * ny;
     this.h = new Float32Array(N);
@@ -177,16 +229,17 @@ export class CpuSolver {
       }
     }
     this.rainVolume += rain * dx * dx;
-    if (this.inflow) {
-      const { cells, Q, ramp } = this.inflow;
-      const q = inflowRate(Q, ramp, t - dt / 2);
-      const dh = (q * dt) / (cells.length * dx * dx);
+    if (this.flat) {
+      const { cells } = this.flat;
+      const r = sourceDepthRates(this.sources, this.flat, t - dt / 2, dx, this.rates);
+      let vol = 0;
       for (let m = 0; m < cells.length; m++) {
         const k = cells[m];
-        h[k] += dh;
+        h[k] += r[m] * dt;
+        vol += r[m] * dt;
         if (h[k] > hm) hm = h[k];
       }
-      this.rainVolume += q * dt;
+      this.rainVolume += vol * dx * dx;
     }
     return hm;
   }
@@ -205,7 +258,8 @@ export class CpuSolver {
         const uy = qy[(j + 1) * nx + i];
         Q += ux * g.wx[m] + uy * g.wy[m];
       }
-      return Math.abs(Q);
+      // Points de suivi : débit sans signe ; faces du bord d'une zone fine : signé (entrant > 0).
+      return g.signed ? Q : Math.abs(Q);
     });
   }
 

@@ -28,30 +28,31 @@ const { chromium } = require(process.env.PLAYWRIGHT || 'playwright');
       }
     // Apport d'une rivière en amont : 8 m³/s sur 3 mailles du fond de la vallée
     const inflow = { cells: Int32Array.from([31 * nx + 4, 32 * nx + 4, 33 * nx + 4]), Q: 8, ramp: 600 };
-    const gauges = [{ cells: Int32Array.from({ length: 20 }, (_, m) => (22 + m) * nx + 80), wx: new Float32Array(20).fill(dx), wy: new Float32Array(20) }];
+    const gauges = [{ signed: true, cells: Int32Array.from({ length: 20 }, (_, m) => (22 + m) * nx + 80), wx: new Float32Array(20).fill(-dx), wy: new Float32Array(20) }, { cells: Int32Array.from({ length: 20 }, (_, m) => (22 + m) * nx + 80), wx: new Float32Array(20).fill(dx), wy: new Float32Array(20) }];
     const hyeto = makeHyetograph({ totalMm: 80, durationH: 1, shape: 'desbordes' });
     const opts = { hyeto, totalTime: 2 * 3600, gaugeEvery: 300, snapshotEvery: 3600 };
-    const qc = [], qg = [];
+    const qc = [], qg = [], qsc = [], qsg = [];
     const cpu = new CpuBackend({ nx, ny, dx, z, S, manning: n, fc: fcap, m0: 3, inflow }, gauges);
-    const rc = await simulate(cpu, { ...opts, onGauge: (t, Q) => qc.push(Q[0]) });
+    const rc = await simulate(cpu, { ...opts, onGauge: (t, Q) => { qc.push(Q[1]); qsc.push(Q[0]); } });
     const g = new GpuSolver(gpu.device, { nx, ny, dx, z, S, manning: n, fc: fcap, m0: 3, inflow }, gauges);
-    const rg = await simulate(g, { ...opts, onGauge: (t, Q) => qg.push(Q[0]) });
+    const rg = await simulate(g, { ...opts, onGauge: (t, Q) => { qg.push(Q[1]); qsg.push(Q[0]); } });
     const hc = await cpu.readDepth(), hg = await g.readDepth();
     let dmax = 0, hmaxc = 0;
     for (let k = 0; k < N; k++) { dmax = Math.max(dmax, Math.abs(hc[k] - hg[k])); hmaxc = Math.max(hmaxc, hc[k]); }
     let dmaxMax = 0;
     for (let k = 0; k < N; k++) dmaxMax = Math.max(dmaxMax, Math.abs(rc.maxima.hmax[k] - rg.maxima.hmax[k]));
     const peakC = Math.max(...qc), peakG = Math.max(...qg);
+    const signedC = Math.min(...qsc), signedG = Math.min(...qsg);
     // Débit pour l'affichage : même lecture côté GPU et CPU
     const fc = await cpu.readFlux(), fg = await g.readFlux();
     let sc = 0, sg = 0;
     for (let k = 0; k < N; k++) { sc += fc.qm[k]; sg += fg.qm[k]; }
     const flowRel = Math.abs(sc - sg) / Math.max(1e-9, sc);
-    return { stepsCpu: cpu.steps, stepsGpu: g.steps, hmax: hmaxc, maxDiffH: dmax, maxDiffHmax: dmaxMax, peakC, peakG, flowSumCpu: sc, flowSumGpu: sg, flowRel, blocks: [fg.vec.bx, fg.vec.by], adapter: gpu.label };
+    return { signedC, signedG, stepsCpu: cpu.steps, stepsGpu: g.steps, hmax: hmaxc, maxDiffH: dmax, maxDiffHmax: dmaxMax, peakC, peakG, flowSumCpu: sc, flowSumGpu: sg, flowRel, blocks: [fg.vec.bx, fg.vec.by], adapter: gpu.label };
   });
   console.log(JSON.stringify(out, null, 1));
   await browser.close();
-  const ok = out.maxDiffHmax < 0.02 && Math.abs(out.peakC - out.peakG) / out.peakC < 0.03 && out.flowRel < 0.05;
+  const ok = out.signedC < -0.9 * out.peakC && Math.abs(out.signedG - out.signedC) < 0.03 * out.peakC && out.maxDiffHmax < 0.02 && Math.abs(out.peakC - out.peakG) / out.peakC < 0.03 && out.flowRel < 0.05;
   console.log(ok ? 'GPU ≈ CPU : OK' : 'ÉCART GPU/CPU');
   process.exit(ok ? 0 : 1);
 })();

@@ -91,6 +91,12 @@ export function setupUi() {
 
   for (const id of ['rain-mm', 'rain-h', 'rain-shape', 'soil', 'cnf', 'cap-inf']) $(id).addEventListener('input', updateRainInfo);
   for (const id of ['rain-h', 'tail-h', 'res', 'engine']) $(id).addEventListener('input', describeRes);
+  for (const id of ['nest-r', 'nest-res']) $(id).addEventListener('input', describeRes);
+  $('nest-on').addEventListener('change', () => {
+    // Maille fine autour du lieu : le bassin passe à une maille grossière (25 m par défaut).
+    if ($('nest-on').checked && Number($('res').value) < 10) $('res').value = '25';
+    describeRes();
+  });
 
   $('run').onclick = () => (state.run?.running ? stopRun() : startRun());
   $('clear-cache').onclick = async () => {

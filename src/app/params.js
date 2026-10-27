@@ -6,6 +6,7 @@ import { makeHyetograph } from '../hydrology/rain.js';
 import { meanRunoff, meanRunoffHyeto, runoffMm } from '../hydrology/scs.js';
 import { stableDt } from '../sim/scheme.js';
 import { avalParams } from './aval.js';
+import { nestBox } from './nest.js';
 import { $, CPU_CELL_CAP, GPU_CELL_CAP, STUDY_RESOLUTIONS, fmtNum, state } from './core.js';
 import { autoResForStudy, renderStudy, studyCands, studyFrame } from './study.js';
 
@@ -26,6 +27,7 @@ export function params() {
     burn: Math.max(0, Number($('burn').value) || 0),
     cnFactor: Math.max(0.1, Number($('cnf').value) || 1),
     capInf: $('cap-inf').checked,
+    nest: $('nest-on').checked ? { radius: Number($('nest-r').value), res: Number($('nest-res').value) } : null,
     bdtopo: $('bati-ign').checked,
     ...avalParams(),
     engine: $('engine').value,
@@ -164,8 +166,28 @@ export function describeRes() {
         ` <span class="warn">Calcul long : environ ${fmtDur(s)}.</span> Vous pouvez l'arrêter à tout moment, ` +
         'les résultats déjà calculés sont conservés.';
   }
+  if (engine && p.nest && state.study) txt += ' ' + describeNest(p, grid, engine);
   $('res-info').innerHTML = txt;
+  $('nest-opts').hidden = !p.nest;
+  $('res-label').textContent = p.nest ? 'Maille du bassin' : 'Maille de calcul';
   renderStudy();
+}
+
+/** Temps estimé du calcul en deux temps (bassin puis zone fine). */
+function describeNest(p, g1, engine1) {
+  const box = nestBox(g1, state.study.house, p.nest.radius, p.nest.res);
+  if (!box || p.nest.res >= g1.dx) return '<span class="warn">Zone fine : choisissez une maille fine plus petite que celle du bassin.</span>';
+  const p2 = { ...p, res: p.nest.res };
+  const cells2 = box.grid.nx * box.grid.ny;
+  const engine2 = chooseEngine(p2, cells2);
+  if (!engine2) return `<span class="warn">Zone fine trop grande pour cet appareil à ${p.nest.res} m : réduisez-la ou grossissez sa maille.</span>`;
+  const s1 = estimateSeconds(p, g1.nx * g1.ny, engine1);
+  const s2 = estimateSeconds(p2, cells2, engine2);
+  const km = (box.bbox.xmax - box.bbox.xmin) / 1000;
+  return (
+    `Calcul en deux temps : bassin à ${g1.dx} m (≈ ${fmtDur(s1)}), puis zone fine ${fmtNum(km, 1)} × ${fmtNum((box.bbox.ymax - box.bbox.ymin) / 1000, 1)} km ` +
+    `à ${p.nest.res} m (${fmtNum(cells2 / 1e6, 1)} M de mailles, ≈ ${fmtDur(s2)}) : <strong>≈ ${fmtDur(s1 + s2)}</strong> en tout.`
+  );
 }
 
 export function updateRainInfo() {

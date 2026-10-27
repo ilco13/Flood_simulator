@@ -11,6 +11,7 @@ const SITES = {
   touloubre: { name: 'Touloubre à la Barben', lon: 5.175488, lat: 43.628894, area: 212.2, river: 'Touloubre', res: '50' },
   weiss: { name: 'Weiss à Orbey', lon: 7.161617, lat: 48.126926, area: 33.6, river: 'Weiss', res: '25' },
   roya: { name: 'Roya à Fontan', lon: 7.554355, lat: 44.002656, area: 299, river: 'Roya', res: '50' },
+  emboite: { name: 'Torse à Aix, calcul en deux temps (bassin 25 m, zone fine 2 km à 10 m)', lon: 5.4672, lat: 43.518, area: 20.7, river: 'Torse', res: '25', nest: { r: '1000', res: '10' } },
   torse: { name: 'Torse à Aix (Arc en aval)', lon: 5.4672, lat: 43.518, area: 20.7, river: 'Torse', res: '25', aval: { river: 'Arc', minAreaKm2: 250 } },
 };
 
@@ -52,6 +53,12 @@ async function runSite(browser, key) {
     await page.fill('#rain-mm', '80');
     await page.fill('#rain-h', '3');
     await page.dispatchEvent('#rain-h', 'input');
+    if (site.nest) {
+      await page.check('#nest-on');
+      await page.dispatchEvent('#nest-on', 'change');
+      await page.selectOption('#nest-r', site.nest.r);
+      await page.selectOption('#nest-res', site.nest.res);
+    }
     await page.selectOption('#res', site.res);
     await page.dispatchEvent('#res', 'input');
     await page.click('#run');
@@ -60,7 +67,11 @@ async function runSite(browser, key) {
       if (/Terminé|Arrêtée|rreur/.test(await page.textContent('#map-status'))) break;
     }
     const status = await page.textContent('#map-status');
-    check(/pic de crue passé/.test(status), `fin du calcul : ${status.trim()}`);
+    check(/pic de crue passé/.test(status) || (site.nest && /Terminé/.test(status)), `fin du calcul : ${status.trim()}`);
+    if (site.nest) {
+      const n = await page.evaluate(() => ({ nest: window.floodApp.run.nest, dx: window.floodApp.run.grid.dx }));
+      check(n.nest && n.nest.inlets > 0 && n.dx === Number(site.nest.res), `zone fine à ${n.dx} m alimentée par ${n.nest?.inlets ?? 0} entrées d'eau`);
+    }
     const res = await page.evaluate(() => {
       const a = window.floodApp;
       const run = a.run;

@@ -23,6 +23,8 @@ export function prepareTerrain({ grid, dem, rivers, burnDepth, outlet, upstreamO
     else for (let k = 0; k < protect.length; k++) protect[k] |= bld.protect[k];
   }
   const extra = bld ? { bldFrac: bld.frac, bldCells: bld.cells, bldCount: buildings.length } : {};
+  // Mailles du lit des cours d'eau BD TOPO : frottement d'un lit naturel (voir buildModel)
+  if (rivers) extra.channel = channelMask(grid, rivers);
   const { label, breached, parent, order, filled } = drainageLabels(z, grid.nx, grid.ny, {
     maxDepth: Math.max(2, 0.3 * grid.dx),
     maxLength: Math.max(4, Math.round(300 / grid.dx)),
@@ -68,6 +70,21 @@ export function prepareTerrain({ grid, dem, rivers, burnDepth, outlet, upstreamO
   }
   return { z, mask, basinCells, burned, breached, ...extra };
 }
+
+/** Mailles traversées par un cours d'eau BD TOPO à ciel ouvert (gravé dans le relief). */
+export function channelMask(grid, rivers) {
+  const m = new Uint8Array(grid.nx * grid.ny);
+  for (const f of rivers?.features || []) {
+    if (!isBurnable(f)) continue;
+    const g = f.geometry;
+    const parts = g.type === 'MultiLineString' ? g.coordinates : g.type === 'LineString' ? [g.coordinates] : [];
+    for (const part of parts) rasterizeLine(grid, part, (k) => (m[k] = 1));
+  }
+  return m;
+}
+
+/** Frottement (Manning) d'un lit naturel de cours d'eau. */
+export const N_CHANNEL = 0.035;
 
 /** Part bâtie de chaque maille (0–1) et hauteur du plus haut bâtiment qui la couvre. */
 export function buildingCoverage(grid, buildings) {
@@ -342,6 +359,11 @@ export function buildModel({ grid, terrain, classes, spc = 1, soilGroup, amc, ra
     capInfiltration,
   );
   // Mailles partiellement bâties (rues étroites à maille grossière) : passage gardé, frottement accru.
+  // Lit des cours d'eau : l'eau y coule dans le lit, pas dans la végétation que l'occupation du sol
+  // voit au-dessus (ripisylve classée en forêt, frottement 0,12) ; sans cela, aux mailles
+  // grossières, la crue est fortement ralentie.
+  const ch = terrain.channel;
+  if (ch) for (let k = 0; k < manning.length; k++) if (ch[k] && manning[k] > N_CHANNEL) manning[k] = N_CHANNEL;
   const bf = terrain.bldFrac;
   if (bf) for (let k = 0; k < manning.length; k++) if (bf[k] > 0 && bf[k] < 1) manning[k] += 0.2 * bf[k];
   return { nx: grid.nx, ny: grid.ny, dx: grid.dx, z: terrain.z, S, manning, fc, m0: hortonM0(amc) };

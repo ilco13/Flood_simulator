@@ -7,6 +7,7 @@ import { cellOf, toL93, toWgs } from '../geo.js';
 import { setGeoJson, setWaterCanvas } from '../map.js';
 import { simulate } from '../sim/driver.js';
 import { AVAL_RAMP, inflowCells, mainReceiver } from './aval.js';
+import { nestBox, boundaryGauges, nestSources } from './nest.js';
 import { escHtml } from './compareUi.js';
 import { $, CPU_CELL_CAP, GPU_CELL_CAP, fmtH, fmtNum, state } from './core.js';
 import { ensureWater3d } from './mapUi.js';
@@ -119,13 +120,43 @@ export function showContext(data) {
 
 /* ---------- Simulation ---------- */
 
+/**
+ * Lance une simulation : en une passe, ou en deux temps si la maille fine autour du lieu est
+ * demandée (bassin entier à la maille choisie, puis carré autour du lieu à maille fine).
+ */
 export async function startRun() {
   const p = params();
+  const g1 = p.nest && state.study ? currentGrid(p) : null;
+  const box = g1 ? nestBox(g1, state.study.house, p.nest.radius, p.nest.res) : null;
+  if (!box || p.nest.res > g1.dx) return runOnce({ p });
+  const faces = boundaryGauges(g1, box);
+  const t0 = performance.now();
+  const r1 = await runOnce({ p, grid: g1, extraGauges: faces, gaugeEvery: 120, phase: 'coarse', phaseLabel: `1/2 : bassin entier à ${g1.dx} m` });
+  if (!r1?.ok) return r1;
+  const c = r1.run;
+  const coarseSeconds = (performance.now() - t0) / 1000;
+  const coarsePeaks = c.gauges.map((g, i) => ({ id: g.id, name: g.name, peak: c.series[i].reduce((m, q) => Math.max(m, q[1]), 0) }));
+  const side = [(box.bbox.xmax - box.bbox.xmin) / 1000, (box.bbox.ymax - box.bbox.ymin) / 1000];
+  const p2 = { ...p, res: p.nest.res, nestOf: { coarse: g1.dx, side } };
+  return runOnce({
+    p: p2,
+    grid: box.grid,
+    totalTime: c.tEnd ?? c.totalTime,
+    phase: 'fine',
+    phaseLabel: `2/2 : zone fine à ${p.nest.res} m`,
+    makeSources: (grid, data) => nestSources(grid, data.z || data.dem, faces, c.bseries),
+    nest: { coarseRes: g1.dx, coarseSeconds, side, coarsePeaks },
+  });
+}
+
+/** Une passe de calcul. opts : { p, grid, extraGauges, gaugeEvery, totalTime, phase, phaseLabel, makeSources, nest } */
+async function runOnce(opts = {}) {
+  const p = opts.p ?? params();
   if (p.rainMm <= 0) {
     prog.error('Indiquez un cumul de pluie supérieur à 0 mm.');
     return;
   }
-  const grid = currentGrid(p);
+  const grid = opts.grid ?? currentGrid(p);
   if (!grid) {
     prog.error('Choisissez d\'abord le lieu à étudier (bouton « Choisir le lieu étudié » ou recherche), et au moins un bassin.');
     return;
@@ -165,7 +196,7 @@ export async function startRun() {
   $('run').textContent = 'Arrêter';
   $('run').classList.add('stop');
   showResults(false);
-  prog.start();
+  if (opts.phase !== 'fine') prog.start();
   const cached = state.data?.key === JSON.stringify([grid.xmin, grid.ymin, grid.nx, grid.ny, grid.dx, p.burn]);
   if (!cached) prog.status(CONNECTING);
 
@@ -190,14 +221,32 @@ export async function startRun() {
       cnFactor: p.cnFactor,
       capInfiltration: p.capInf,
     });
+    model.sources = [];
     if (p.aval) {
+      // En zone fine, la rivière n'est injectée que si son point d'injection y est : sinon son
+      // eau entre déjà par le bord, avec les débits du calcul du bassin.
       const r = mainReceiver()?.receiver;
       const cells = r ? inflowCells(grid, data.z || data.dem, r.src) : null;
-      if (cells?.length) model.inflow = { cells, Q: p.aval.Q, ramp: AVAL_RAMP };
-      else data.warnings = [...(data.warnings || []), 'rivière aval hors de la zone de calcul : non simulée'];
+      if (cells?.length) model.sources.push({ cells, t: [0, AVAL_RAMP, 1e12], Q: [0, p.aval.Q, p.aval.Q] });
+      else if (opts.phase !== 'fine') data.warnings = [...(data.warnings || []), 'rivière aval hors de la zone de calcul : non simulée'];
+    }
+    if (opts.makeSources) {
+      const ns = opts.makeSources(grid, data);
+      model.sources.push(...ns.sources);
+      // Bord fermé là où l'eau entre (relief du calcul seulement : copie, l'affichage garde le vrai)
+      if (ns.walls?.length) {
+        model.z = model.z.slice();
+        for (const k of ns.walls) model.z[k] += 50;
+      }
+      run.nest = { ...opts.nest, inlets: ns.sources.length, peakIn: ns.peakSum };
     }
     run.gauges = data.gauges;
     run.series = data.gauges.map(() => [[0, 0]]);
+    // Points de mesure supplémentaires (bord de la zone fine), hors affichage
+    const extra = opts.extraGauges || [];
+    run.solverGauges = [...data.gauges, ...extra];
+    run.bseries = extra.map(() => [[0, 0]]);
+    run.gaugeEvery = opts.gaugeEvery ?? 300;
 
     // Couche d'eau
     run.water = new WaterCanvas(grid, toWgs, toL93);
@@ -208,7 +257,7 @@ export async function startRun() {
     if (state.is3d) ensureWater3d();
 
     const hyeto = hyetoOf(p);
-    const totalTime = (p.rainH + p.tailH) * 3600;
+    const totalTime = opts.totalTime ?? (p.rainH + p.tailH) * 3600;
     const snapshotEvery = Math.max(600, Math.ceil(totalTime / 150 / 300) * 300);
     run.totalTime = totalTime;
     run.hyeto = hyeto;
@@ -220,7 +269,8 @@ export async function startRun() {
 
     const callbacks = {
       onGauge: (t, Q) => {
-        Q.forEach((q, i) => run.series[i].push([t, q]));
+        const n = run.series.length;
+        Q.forEach((q, i) => (i < n ? run.series[i] : run.bseries[i - n]).push([t, q]));
         drawHydroThrottled();
         if (p.stopAfterPeak && !run.stop && peakPassed(run, t, p)) {
           run.autoStopped = true;
@@ -256,7 +306,7 @@ export async function startRun() {
         prog.set(
           'sim',
           frac,
-          `${fmtH(info.t)} / ${fmtH(totalTime)} simulées` +
+          `${opts.phaseLabel ? `${opts.phaseLabel} · ` : ''}${fmtH(info.t)} / ${fmtH(totalTime)} simulées` +
             ` · reste ≈ ${fmtDur(eta)}${p.stopAfterPeak ? ' (arrêt après le pic estimé)' : ''}` +
             ` · ${engine === 'gpu' ? 'GPU' : 'CPU'}`,
         );
@@ -268,10 +318,10 @@ export async function startRun() {
     let mass = null;
     run.t0 = performance.now();
     if (engine === 'gpu') {
-      const solver = new GpuSolver(state.gpu.device, model, data.gauges);
+      const solver = new GpuSolver(state.gpu.device, model, run.solverGauges);
       run.solver = solver;
       try {
-        const res = await simulate(solver, { hyeto, totalTime, gaugeEvery: 300, snapshotEvery, ...callbacks });
+        const res = await simulate(solver, { hyeto, totalTime, gaugeEvery: run.gaugeEvery, snapshotEvery, ...callbacks });
         maxima = res.maxima;
         run.tEnd = res.t;
       } finally {
@@ -282,15 +332,22 @@ export async function startRun() {
     }
     run.maxima = maxima;
     run.maxQ = quantize(maxima.hmax);
-    finishRun(run, mass);
+    if (opts.phase === 'coarse') {
+      // Premier temps du calcul emboîté : pas d'enregistrement ni de bilan.
+      run.userStopped = run.stop && !run.autoStopped;
+      if (run.autoStopped) run.totalTime = run.tEnd;
+      prog.status('Bassin calculé : zone fine autour du lieu…');
+    } else finishRun(run, mass);
   } catch (err) {
     console.error(err);
     if (err.message === 'Arrêté') prog.finish('Simulation arrêtée.', false);
     else prog.error(`Erreur : ${err.message}`);
   } finally {
     run.running = false;
-    $('run').textContent = 'Lancer la simulation';
-    $('run').classList.remove('stop');
+    if (opts.phase !== 'coarse' || !run.maxima || run.userStopped) {
+      $('run').textContent = 'Lancer la simulation';
+      $('run').classList.remove('stop');
+    }
   }
   return { run, ok: !!run.maxima && !run.userStopped };
 }
@@ -341,9 +398,9 @@ export function runCpu(run, model, p, totalTime, snapshotEvery, cb) {
     w.postMessage({
       type: 'run',
       model,
-      gauges: run.gauges.map(({ cells, wx, wy }) => ({ cells, wx, wy })),
+      gauges: (run.solverGauges || run.gauges).map(({ cells, wx, wy, signed }) => ({ cells, wx, wy, signed })),
       rain: { totalMm: p.rainMm, durationH: p.rainH, shape: p.shape },
-      options: { totalTime, gaugeEvery: 300, snapshotEvery },
+      options: { totalTime, gaugeEvery: run.gaugeEvery ?? 300, snapshotEvery },
     });
   });
 }
@@ -381,6 +438,15 @@ export function finishRun(run, mass) {
     })
     .join('<br>');
   let txt = `Calcul terminé en ${fmtNum(el)} s. Surface du bassin sous plus de 50 cm d'eau au maximum : <strong>${fmtNum(a50 * cellKm2, 2)} km²</strong> (plus d'1 m : ${fmtNum(a100 * cellKm2, 2)} km²).<br>${peaks}`;
+  if (run.nest) {
+    const n = run.nest;
+    const cp = n.coarsePeaks.filter((g) => g.id.startsWith('study')).map((g) => `${g.name} : ${fmtNum(g.peak)} m³/s`).join(', ');
+    txt =
+      `Calcul en deux temps : bassin entier à ${n.coarseRes} m (${fmtNum(n.coarseSeconds)} s), puis zone fine de ${fmtNum(n.side[0], 1)} × ${fmtNum(n.side[1], 1)} km à ${grid.dx} m (${fmtNum(el)} s), ` +
+      `alimentée par ${n.inlets} entrée${n.inlets > 1 ? 's' : ''} d'eau sur son bord (jusqu'à ${fmtNum(n.peakIn, 1)} m³/s au total)` +
+      `${cp ? ` ; dans le calcul du bassin : ${cp}` : ''}.<br>` +
+      txt.replace(/^Calcul terminé en [^.]+\. Surface du bassin/, 'Surface de la zone fine');
+  }
   if (mass) {
     const err = mass.rain > 0 ? ((mass.rain - mass.out - mass.stored) / mass.rain) * 100 : 0;
     txt += `<br>Bilan de masse : erreur ${fmtNum(err, 3)} %.`;

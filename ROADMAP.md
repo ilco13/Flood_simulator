@@ -34,11 +34,13 @@ But : rendre le code plus sûr à faire évoluer, et corriger la plus grosse err
 
 But : mailles de 1–2 m autour du lieu en quelques minutes.
 
-- [ ] Calcul emboîté : tout le bassin à maille grossière (25–50 m), débits enregistrés à l'entrée d'un carré de 1–2 km autour du lieu, puis ce carré recalculé finement (1–5 m)
+- [x] Calcul emboîté : tout le bassin à maille grossière (25–50 m), débits enregistrés à l'entrée d'un carré de 1–2 km autour du lieu, puis ce carré recalculé finement (1–5 m)
 - [ ] Pas de temps par zone : grands pas dans les zones calmes, petits dans les zones profondes (supprime aussi les petits écarts vus dans les ravins quand une rivière profonde est simulée)
 - [ ] Calcul processeur sur plusieurs cœurs (appareils sans carte graphique)
 - [ ] Chargement à la demande de la 3D, de la comparaison et de la coupe (démarrage plus rapide sur téléphone)
 - [ ] Vérifier : même résultat au point étudié (±5 %) qu'un calcul fin sur tout le bassin, au moins 5 fois plus vite
+  - Mesuré sur la Torse (80 mm en 1 h), référence 10 m d'un seul tenant : bassin 25 m + zone 2 km à 10 m → −6 %, 7 fois plus vite ; à maille égale → −2 % (couplage fidèle). L'écart restant vient de la maille du bassin.
+- [x] Lit des cours d'eau : frottement d'un lit naturel (et non de la ripisylve) — résultats beaucoup moins dépendants de la maille
 
 ## Étape 3 — Rejouer une crue réelle et caler le modèle (≈ 3 séances)
 
