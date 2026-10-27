@@ -7,6 +7,7 @@ import { CpuSolver } from '../src/sim/cpuSolver.js';
 import { buildGauges, prepareTerrain } from '../src/sim/model.js';
 import { rasterizeLine } from '../src/data/rivers.js';
 import { floodQuantiles } from '../src/hydrology/flood.js';
+import { buildRainZones, zoneCum, zoneOf } from '../src/hydrology/rainField.js';
 import { amcFromWetness, amcIndex, yearsOf, arealHourly, rainWindow, amcFromAntecedent, antecedentIndex, episodeScores, parisDayStart } from '../src/hydrology/episode.js';
 import { parseFlowCsv, topFloods } from '../src/data/hydro.js';
 import { runMetrics, analyseComparison, diffCodes, durationAbove } from '../src/sim/compare.js';
@@ -352,6 +353,28 @@ await test('épisode réel : pluie moyenne, fenêtre, humidité du sol, écarts 
   // Crues distinctes (5 jours d'écart au moins)
   const top = topFloods([['2008-12-14', 176], ['2008-12-15', 155], ['2019-11-23', 143]], 3);
   assert.deepEqual(top.map((x) => x.date), ['2008-12-14', '2019-11-23']);
+});
+
+await test('pluie par blocs : interpolation des stations et pluie reçue par chaque maille', async () => {
+  // Domaine 4 km × 1 km, maille 100 m ; station sèche à l'ouest, 20 mm/h à l'est
+  const nx = 40, ny = 10, dx = 100, N = nx * ny;
+  const grid = { xmin: 0, ymax: 1000, nx, ny, dx };
+  const st = [{ x: -500, y: 500, rr: Float32Array.of(0, 0) }, { x: 4500, y: 500, rr: Float32Array.of(20, 20) }];
+  const rz = buildRainZones(grid, st, 2);
+  assert.equal(rz.nzx, 4);
+  assert.ok(zoneCum(rz, zoneOf(rz, 0, 0), 7200) < 8 && zoneCum(rz, zoneOf(rz, 39, 0), 7200) > 30, 'ouest sec, est arrosé');
+  assert.ok(Math.abs(zoneCum(rz, 3, 3600) - 0.5 * zoneCum(rz, 3, 7200)) < 1e-6, 'cumul linéaire dans l\'heure');
+  // Sol imperméable, terrain plat fermé : chaque maille garde la pluie de son bloc
+  const z = new Float32Array(N).fill(100);
+  const b = new CpuBackend({ nx, ny, dx, z, S: new Float32Array(N), manning: new Float32Array(N).fill(5), rainZones: rz }, []);
+  const hy = makeHyetograph({ totalMm: 1, durationH: 2, shape: 'uniform' });
+  await simulate(b, { hyeto: hy, totalTime: 7200, gaugeEvery: 600, snapshotEvery: 7200 });
+  const h = await b.readDepth();
+  const expectW = zoneCum(rz, zoneOf(rz, 1, 5), 7200) / 1000;
+  const expectE = zoneCum(rz, zoneOf(rz, 38, 5), 7200) / 1000;
+  assert.ok(Math.abs(h[5 * nx + 1] - expectW) < 0.002 && Math.abs(h[5 * nx + 38] - expectE) < 0.002, `ouest ${h[5 * nx + 1]} / ${expectW}, est ${h[5 * nx + 38]} / ${expectE}`);
+  const m = b.massBalance();
+  assert.ok(Math.abs(m.rain - m.out - m.stored) / m.rain < 1e-3, 'bilan de masse');
 });
 
 await test('comparaison : indicateurs, analyse et carte des écarts', () => {

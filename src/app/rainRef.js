@@ -5,26 +5,41 @@ import { studyCands } from './study.js';
 
 /* ---------- Pluies de référence (stations Météo-France proches) ---------- */
 
-/** Département(s) du lieu : le sien d'abord, puis ceux à moins de ~20 km. */
+/**
+ * Départements du lieu et des alentours (stations Météo-France à moins de 25 km) : commune qui
+ * contient le point central et 8 points à ≈ 22 km (service des communes de l'État, qui répond
+ * partout ; à défaut, géocodage inverse IGN, qui ne répond que près d'une adresse).
+ */
 export async function departmentsAround(lon, lat) {
-  const deps = [];
-  const pts = [[0, 0], [0.25, 0], [-0.25, 0], [0, 0.18], [0, -0.18]];
-  for (const [dx, dy] of pts) {
+  const pts = [[0, 0]];
+  for (const dx of [-0.28, 0, 0.28]) for (const dy of [-0.2, 0, 0.2]) if (dx || dy) pts.push([dx, dy]);
+  const depOf = async ([dx, dy]) => {
+    const x = lon + dx;
+    const y = lat + dy;
     try {
-      const res = await fetchWithTimeout(
-        `https://data.geopf.fr/geocodage/reverse?lon=${lon + dx}&lat=${lat + dy}&index=address&limit=1`,
-        8000,
-      );
-      const code = (await res.json()).features?.[0]?.properties?.citycode;
-      if (!code) continue;
-      let dep = code.startsWith('97') ? code.slice(0, 3) : code.slice(0, 2);
-      if (dep === '2A' || dep === '2B') dep = '20';
-      if (!deps.includes(dep)) deps.push(dep);
+      const res = await fetchWithTimeout(`https://geo.api.gouv.fr/communes?lat=${y.toFixed(4)}&lon=${x.toFixed(4)}&fields=codeDepartement&format=json`, 8000);
+      const d = (await res.json())?.[0]?.codeDepartement;
+      if (d) return d;
     } catch {
-      /* point en mer ou service indisponible */
+      /* service indisponible : géocodage IGN */
     }
+    try {
+      const res = await fetchWithTimeout(`https://data.geopf.fr/geocodage/reverse?lon=${x}&lat=${y}&index=address&limit=1`, 8000);
+      const code = (await res.json()).features?.[0]?.properties?.citycode;
+      if (code) return code.startsWith('97') ? code.slice(0, 3) : code.slice(0, 2);
+    } catch {
+      /* point en mer ou hors ligne */
+    }
+    return null;
+  };
+  const found = await Promise.all(pts.map(depOf));
+  const deps = [];
+  for (let d of found) {
+    if (!d) continue;
+    if (d === '2A' || d === '2B') d = '20';
+    if (!deps.includes(d)) deps.push(d);
   }
-  return deps.slice(0, 3);
+  return deps.slice(0, 4);
 }
 
 export async function fetchRainRef() {

@@ -13,6 +13,7 @@ const { chromium } = require(process.env.PLAYWRIGHT || 'playwright');
     const { getGpuDevice, GpuSolver } = await import('/src/sim/gpuSolver.js');
     const { CpuBackend, simulate } = await import('/src/sim/driver.js');
     const { makeHyetograph } = await import('/src/hydrology/rain.js');
+    const { buildRainZones } = await import('/src/hydrology/rainField.js');
     const gpu = await getGpuDevice();
     if (!gpu) return { error: 'pas de GPU' };
     // Vallée en V inclinée avec une cuvette, sol hétérogène
@@ -30,11 +31,13 @@ const { chromium } = require(process.env.PLAYWRIGHT || 'playwright');
     const inflow = { cells: Int32Array.from([31 * nx + 4, 32 * nx + 4, 33 * nx + 4]), Q: 8, ramp: 600 };
     const gauges = [{ signed: true, cells: Int32Array.from({ length: 20 }, (_, m) => (22 + m) * nx + 80), wx: new Float32Array(20).fill(-dx), wy: new Float32Array(20) }, { cells: Int32Array.from({ length: 20 }, (_, m) => (22 + m) * nx + 80), wx: new Float32Array(20).fill(dx), wy: new Float32Array(20) }];
     const hyeto = makeHyetograph({ totalMm: 80, durationH: 1, shape: 'desbordes' });
+    // Pluie par blocs : averse plus forte à l'est (deux stations fictives, 2 h)
+    const rainZones = buildRainZones({ xmin: 0, ymax: ny * dx, nx, ny, dx }, [{ x: -200, y: 320, rr: Float32Array.of(20, 5) }, { x: 1200, y: 320, rr: Float32Array.of(60, 20) }], 2, 300);
     const opts = { hyeto, totalTime: 2 * 3600, gaugeEvery: 300, snapshotEvery: 3600 };
     const qc = [], qg = [], qsc = [], qsg = [];
-    const cpu = new CpuBackend({ nx, ny, dx, z, S, manning: n, fc: fcap, m0: 3, inflow }, gauges);
+    const cpu = new CpuBackend({ nx, ny, dx, z, S, manning: n, fc: fcap, m0: 3, inflow, rainZones }, gauges);
     const rc = await simulate(cpu, { ...opts, onGauge: (t, Q) => { qc.push(Q[1]); qsc.push(Q[0]); } });
-    const g = new GpuSolver(gpu.device, { nx, ny, dx, z, S, manning: n, fc: fcap, m0: 3, inflow }, gauges);
+    const g = new GpuSolver(gpu.device, { nx, ny, dx, z, S, manning: n, fc: fcap, m0: 3, inflow, rainZones }, gauges);
     const rg = await simulate(g, { ...opts, onGauge: (t, Q) => { qg.push(Q[1]); qsg.push(Q[0]); } });
     const hc = await cpu.readDepth(), hg = await g.readDepth();
     let dmax = 0, hmaxc = 0;

@@ -6,6 +6,7 @@ import { stationsIn, dailyMax, topFloods, episodeFlows, parseFlowCsv } from '../
 import { drawChart } from '../ui/chart.js';
 import { localDay, parisDayStart, arealHourly, rainWindow, amcIndex, amcFromWetness, antecedentIndex, episodeScores } from '../hydrology/episode.js';
 import { rootWetness } from '../data/soilMoisture.js';
+import { toL93 } from '../geo.js';
 import { $, fmtNum, state } from './core.js';
 import { departmentsAround, fetchRainRef } from './rainRef.js';
 import { studyPlace, saveStudy, showStudy, renderStudy, autoResForStudy } from './study.js';
@@ -194,7 +195,13 @@ async function replay(st, flood) {
     const total = hourly.reduce((x, y) => x + y, 0);
     const simT0 = t0 + win.s * 3600e3;
     const obs = await episodeFlows(st.code, localDay(simT0 - 864e5), localDay(simT0 + (hourly.length + 48) * 3600e3)).catch(() => ({ daily: [], curve: null }));
-    state.episode = { station: st, flood, t0: simT0, hourly, total, ante, ante30, api, wet, amc, amcIdx, stations: good.map((x) => ({ name: x.name, d: x.d })), obs, csv: null, cand: c.name, ratio };
+    state.episode = { station: st, flood, t0: simT0, hourly, total, ante, ante30, api, wet, amc, amcIdx, stations: good.map((x) => ({ name: x.name, d: x.d })),
+      // Pluie de chaque station sur la fenêtre (Lambert 93), pour la pluie par blocs
+      series: good.map((x) => {
+        const [sx, sy] = toL93(x.lon, x.lat);
+        return { x: sx, y: sy, rr: Array.from(x.rr.slice(win.s, win.e)) };
+      }),
+      obs, csv: null, cand: c.name, ratio };
     // Panneau : pluie de l'épisode (non modifiable), humidité du sol proposée
     $('rain-mm').value = Math.round(total);
     $('rain-h').value = hourly.length;
@@ -257,6 +264,7 @@ export function episodeParams() {
     shape: 'observed',
     hourly: ep.hourly,
     episode: { code: ep.station.code, date: ep.flood.date },
+    ...($('ep-spatial').checked && ep.series?.length > 1 ? { rainStations: ep.series } : {}),
     // Humidité continue tant que l'utilisateur n'a pas choisi une autre classe
     ...(state.amc === ep.amc && !ep.amcForced ? { amcIdx: ep.amcIdx } : {}),
   };

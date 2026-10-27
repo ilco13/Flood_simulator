@@ -7,6 +7,7 @@ import { cellOf, toL93, toWgs } from '../geo.js';
 import { setGeoJson, setWaterCanvas } from '../map.js';
 import { simulate } from '../sim/driver.js';
 import { AVAL_RAMP, inflowCells, mainReceiver } from './aval.js';
+import { buildRainZones } from '../hydrology/rainField.js';
 import { nestBox, boundaryGauges, nestSources } from './nest.js';
 import { renderEpisodeCompare } from './episode.js';
 import { escHtml } from './compareUi.js';
@@ -223,6 +224,11 @@ async function runOnce(opts = {}) {
       capInfiltration: p.capInf,
     });
     model.sources = [];
+    // Épisode réel : pluie variable dans l'espace (blocs d'environ 1 km, d'après les stations)
+    if (p.rainStations) {
+      model.rainZones = buildRainZones(grid, p.rainStations, p.hourly.length);
+      run.rainZonesInfo = { nz: model.rainZones.nz, block: model.rainZones.bi * grid.dx, stations: p.rainStations.length };
+    }
     if (p.aval) {
       // En zone fine, la rivière n'est injectée que si son point d'injection y est : sinon son
       // eau entre déjà par le bord, avec les débits du calcul du bassin.
@@ -453,6 +459,10 @@ export function finishRun(run, mass) {
     txt += `<br>Bilan de masse : erreur ${fmtNum(err, 3)} %.`;
   }
   if (state.data.bldCount) txt += `<br>Bâtiments IGN pris en compte : ${fmtNum(state.data.bldCount)} à moins d'1 km du lieu (${fmtNum(state.data.bldCells)} mailles bâties à plus de moitié, relevées ; les autres gardent le passage avec un frottement accru).`;
+  if (run.rainZonesInfo) {
+    const z = run.rainZonesInfo;
+    txt += `<br>Pluie variable dans l'espace : ${fmtNum(z.nz)} blocs de ${fmtNum(z.block)} m, d'après ${z.stations} stations Météo-France.`;
+  }
   if (run.params.aval) {
     const r = mainReceiver()?.receiver;
     txt += `<br>Rivière aval${r?.name ? ` (${escHtml(r.name)})` : ''} maintenue en crue à <strong>${fmtNum(run.params.aval.Q)} m³/s</strong> pendant tout l'épisode.`;

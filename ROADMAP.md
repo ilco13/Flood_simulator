@@ -65,7 +65,10 @@ But : moins de réglages « au jugé ».
 
 - [x] Humidité du sol mesurée : l'indice quotidien Météo-France (SIM2) n'est pas lisible depuis une page (fichiers nationaux de 1,3 Go triés par point) ; remplacé par NASA POWER (réanalyse MERRA-2, part de saturation de la zone des racines, depuis 1981, maille ≈ 50 km, sans clé). Utilisé pour les crues rejouées (la veille de la pluie) et affiché pour aujourd'hui dans la section Sol (bouton pour l'appliquer). Open-Meteo (ERA5-Land, plus fin) envisageable : quota journalier par adresse, non testable depuis l'environnement de développement.
   - Effet sur l'Arc à Meyreuil : même humidité mesurée avant les crues de 2019 et 2008 (75 %) ; calage sur 2019 → ×1,5 (pic +10 %, volume −1 %), appliqué tel quel à 2008 → pic +26 %, volume +12 % (au lieu de +66 % avec l'estimation par les pluies).
-- [ ] Pluie variable dans l'espace : pluie de chaque station répartie sur le bassin (épisodes historiques) ; radar plus tard si les données sont ouvertes
+- [x] Pluie variable dans l'espace (épisodes réels) : blocs d'≈ 1 km (2 048 au plus), pluie horaire de chaque bloc interpolée depuis les stations (inverse du carré de la distance), dans les deux moteurs ; radar plus tard si les données sont ouvertes
+  - Corrigé au passage : les départements voisins n'étaient pas tous lus (géocodage inverse IGN muet loin des adresses ; lecture arrêtée trop tôt) → service des communes de l'État et lecture de tous les départements.
+  - Ganière 09/09/2002 sans calage : −53 % (5 stations d'Ardèche) → −35 % (9 stations, dont le Gard : La Grand-Combe 257 mm, Salindres 510 mm).
+  - Arc, réglage ×1,5 : 2019 +26 %, 2008 +10 % (les deux dans ±30 %).
 - [ ] Ponts et buses : ouvrages repérés sur les cours d'eau étudiés, dimensions estimées ou saisies (largeur, hauteur sous tablier), débordement par-dessus la route au-delà de leur capacité (pont de l'avenue de Villelongue)
 - [ ] Rivière aval : reprendre les débits de crue décennale / centennale des stations quand ils existent, à la place de la formule
 

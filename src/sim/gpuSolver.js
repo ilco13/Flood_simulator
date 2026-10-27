@@ -5,6 +5,7 @@
 import { G, H_MIN, FROUDE_MAX, V_MAX, BOUNDARY_SLOPE, THETA, stableDt } from './scheme.js';
 import { IA_RATIO, HORTON_P, NO_CAP } from '../hydrology/scs.js';
 import { normalizeSources, flattenSources, sourceDepthRates } from './cpuSolver.js';
+import { MAX_ZONES, zoneCum } from '../hydrology/rainField.js';
 import { fluxFields } from './flux.js';
 
 const WG = 16;
@@ -17,7 +18,8 @@ struct Consts {
   hmin: f32, frmax: f32, vmax: f32, theta: f32,
   bslope: f32, ia: f32, p0: f32, p1: f32,
 };
-struct Step { dt: f32, t: f32, rain: f32, cumP: f32, qin: f32, pad0: f32, pad1: f32, pad2: f32 };
+// tb : début du lot ; zoned, bi, nzx : pluie par blocs (épisodes réels), voir rainField.js
+struct Step { dt: f32, t: f32, rain: f32, cumP: f32, tb: f32, zoned: f32, bi: f32, nzx: f32 };
 @group(0) @binding(0) var<uniform> C: Consts;
 `;
 
@@ -147,6 +149,8 @@ const DEPTH_WGSL = /* wgsl */ `${COMMON}
 @group(0) @binding(7) var<storage, read_write> tmaxC: array<f32>;
 @group(0) @binding(8) var<storage, read_write> vmaxC: array<f32>;
 @group(0) @binding(9) var<storage, read_write> stats: array<atomic<u32>>;
+// Pluie des blocs pendant le lot : (intensité mm/s, cumul au début du lot en mm, -, -)
+@group(0) @binding(10) var<uniform> RZ: array<vec4<f32>, ${MAX_ZONES}>;
 
 var<workgroup> wgMax: atomic<u32>;
 
@@ -163,15 +167,24 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>,
     var hn = h[k] + P.dt / C.dx * (qx[fx] - qx[fx + 1u] + qy[fy] - qy[fy + nx]);
     let sf = S[k];
     let s = sf.x;
-    if (P.rain > 0.0 && s >= 0.0) {
-      let x = P.cumP - C.ia * s;
+    var rain = P.rain;
+    var cumP = P.cumP;
+    if (P.zoned > 0.5) {
+      let bi = u32(P.bi);
+      let z = (j / bi) * u32(P.nzx) + i / bi;
+      let zr = RZ[z];
+      rain = zr.x * P.dt / 1000.0;
+      cumP = zr.y + zr.x * (P.t - 0.5 * P.dt - P.tb);
+    }
+    if (rain > 0.0 && s >= 0.0) {
+      let x = cumP - C.ia * s;
       var r = 0.0;
       if (x > 0.0) {
-        r = P.rain * (1.0 - (s * s) / ((x + s) * (x + s)));
+        r = rain * (1.0 - (s * s) / ((x + s) * (x + s)));
       }
       // Plafond d'infiltration (Horton) : l'excédent de pluie ruisselle (C.p0 = m0, C.p1 = P*)
-      let cap = sf.y * P.dt * (1.0 + (C.p0 - 1.0) * exp(-P.cumP / C.p1));
-      r = max(r, P.rain - cap);
+      let cap = sf.y * P.dt * (1.0 + (C.p0 - 1.0) * exp(-cumP / C.p1));
+      r = max(r, rain - cap);
       hn = hn + r;
     }
     hn = max(hn, 0.0);
@@ -261,7 +274,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 `;
 
 export class GpuSolver {
-  constructor(device, { nx, ny, dx, z, S, manning, fc = null, m0 = 3, inflow = null, sources = null }, gauges) {
+  constructor(device, { nx, ny, dx, z, S, manning, fc = null, m0 = 3, inflow = null, sources = null, rainZones = null }, gauges) {
+    this.rz = rainZones;
+    this.rzData = new Float32Array(4 * MAX_ZONES);
     this.sources = normalizeSources({ sources, inflow });
     this.flat = this.sources.length ? flattenSources(this.sources) : null;
     this.rates = this.flat ? new Float32Array(this.flat.cells.length) : null;
@@ -288,6 +303,7 @@ export class GpuSolver {
 
     this.bufs = {
       consts: mk(48, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST),
+      rz: mk(16 * MAX_ZONES, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST),
       steps: mk(STEP_STRIDE * MAX_BATCH, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST),
       z: mk(N * 4),
       h: mk(N * 4),
@@ -393,7 +409,7 @@ export class GpuSolver {
     const fluxL = this.#layout(['u', 'ud', 'r', 'r', 'r', 'r', 'w', 'w', 'r']);
     const ratioL = this.#layout(['u', 'ud', 'r', 'r', 'r', 'w']);
     const scaleL = this.#layout(['u', 'w', 'w', 'r']);
-    const depthL = this.#layout(['u', 'ud', 'w', 'r', 'r', 'r', 'w', 'w', 'w', 'w']);
+    const depthL = this.#layout(['u', 'ud', 'w', 'r', 'r', 'r', 'w', 'w', 'w', 'w', 'u']);
     const gaugeL = this.#layout(['u', 'r', 'r', 'r', 'w']);
     this.fluxPipe = this.#pipeline(FLUX_WGSL, fluxL);
     this.ratioPipe = this.#pipeline(RATIO_WGSL, ratioL);
@@ -421,7 +437,7 @@ export class GpuSolver {
     this.ratioBG = [0, 1].map((p) => bg(ratioL, [b.consts, stepBinding, b.h, b.qx[p], b.qy[p], b.ratio]));
     this.scaleBG = [0, 1].map((p) => bg(scaleL, [b.consts, b.qx[p], b.qy[p], b.ratio]));
     this.depthBG = [0, 1].map((p) =>
-      bg(depthL, [b.consts, stepBinding, b.h, b.qx[p], b.qy[p], b.S, b.hmax, b.tmax, b.vmax, b.stats]),
+      bg(depthL, [b.consts, stepBinding, b.h, b.qx[p], b.qy[p], b.S, b.hmax, b.tmax, b.vmax, b.stats, b.rz]),
     );
     this.gaugeBG = [0, 1].map((p) => bg(gaugeL, [b.consts, b.qx[p], b.qy[p], b.gcells, b.gsums]));
   }
@@ -444,9 +460,11 @@ export class GpuSolver {
       const kMax = Math.max(1, Math.min(MAX_BATCH, Math.round(this.batchK)));
       const tb = performance.now();
       const tStart = t;
-      // Avec des apports, un lot couvre au plus 30 s (débits mis à jour à chaque lot)
-      while (K < kMax && t < tEnd - 1e-6 && (!this.flat || t - tStart < 30)) {
-        const dt = Math.min(dt0, tEnd - t);
+      // Avec des apports, un lot couvre au plus 30 s (débits mis à jour à chaque lot) ; avec une
+      // pluie par blocs, il s'arrête à l'heure ronde (intensité constante dans le lot).
+      const hourEnd = this.rz ? (Math.floor(tStart / 3600 + 1e-9) + 1) * 3600 : Infinity;
+      while (K < kMax && t < tEnd - 1e-6 && t < hourEnd - 1e-6 && (!this.flat || t - tStart < 30)) {
+        const dt = Math.min(dt0, tEnd - t, hourEnd - t);
         const P0 = hyeto.cumulative(t);
         const P1 = hyeto.cumulative(t + dt);
         const o = (K * STEP_STRIDE) / 4;
@@ -454,10 +472,25 @@ export class GpuSolver {
         pf[o + 1] = t + dt;
         pf[o + 2] = (P1 - P0) / 1000;
         pf[o + 3] = 0.5 * (P0 + P1);
+        pf[o + 4] = tStart;
+        pf[o + 5] = this.rz ? 1 : 0;
+        pf[o + 6] = this.rz ? this.rz.bi : 1;
+        pf[o + 7] = this.rz ? this.rz.nzx : 1;
         t += dt;
         K++;
       }
       d.queue.writeBuffer(this.bufs.steps, 0, params, 0, K * STEP_STRIDE);
+      if (this.rz) {
+        // Intensité de chaque bloc pendant l'heure du lot, cumul au début du lot
+        const h0 = Math.floor(tStart / 3600 + 1e-9);
+        for (let z = 0; z < this.rz.nz; z++) {
+          const c0 = zoneCum(this.rz, z, h0 * 3600);
+          const c1 = zoneCum(this.rz, z, (h0 + 1) * 3600);
+          this.rzData[4 * z] = (c1 - c0) / 3600;
+          this.rzData[4 * z + 1] = zoneCum(this.rz, z, tStart);
+        }
+        d.queue.writeBuffer(this.bufs.rz, 0, this.rzData);
+      }
       if (this.flat) d.queue.writeBuffer(this.bufs.srcRate, 0, sourceDepthRates(this.sources, this.flat, 0.5 * (tStart + t), this.dx, this.rates));
       d.queue.writeBuffer(this.bufs.stats, 0, new Uint32Array(4));
       const enc = d.createCommandEncoder();

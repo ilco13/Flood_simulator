@@ -162,9 +162,9 @@ self.onmessage = async (e) => {
           console.warn('Fichier Météo-France illisible', url, err);
         }
       }
-      // Assez de stations avec des données : inutile de lire les départements voisins.
-      const good = [...stations.values()].filter((s) => s.d <= 15 && s.rr.some((v) => v >= 0)).length;
-      if (good >= 3) break;
+      // Tous les départements voisins sont lus : un bassin à cheval sur deux départements a
+      // souvent ses stations les plus utiles de l'autre côté (et certaines stations proches ont
+      // des trous pendant l'épisode).
     }
     const out = { stations: [...stations.values()].filter((s) => s.rr.some((v) => v >= 0)).sort((a, b) => a.d - b.d) };
     await cachePut(key, out);

@@ -6,6 +6,7 @@
 
 import { G, H_MIN, FROUDE_MAX, V_MAX, BOUNDARY_SLOPE, THETA } from './scheme.js';
 import { IA_RATIO, HORTON_P } from '../hydrology/scs.js';
+import { zoneCum } from '../hydrology/rainField.js';
 
 // q : débit de la face au pas précédent ; qm, qp : faces voisines dans la même direction
 // (pondération θ de de Almeida et al. 2012, qui amortit les oscillations).
@@ -87,7 +88,15 @@ export class CpuSolver {
   /**
    * @param {object} p  { nx, ny, dx, z, S, manning }
    */
-  constructor({ nx, ny, dx, z, S, manning, fc = null, m0 = 3, inflow = null, sources = null }) {
+  constructor({ nx, ny, dx, z, S, manning, fc = null, m0 = 3, inflow = null, sources = null, rainZones = null }) {
+    // Pluie variable dans l'espace : blocs de pluie (épisodes réels), sinon pluie uniforme
+    this.rz = rainZones;
+    if (rainZones) {
+      this.zoneCol = Int32Array.from({ length: nx }, (_, i) => Math.floor(i / rainZones.bi));
+      this.zD = new Float64Array(rainZones.nz);
+      this.zC = new Float64Array(rainZones.nz);
+      this.zCap = new Float64Array(rainZones.nz);
+    }
     this.nx = nx;
     this.ny = ny;
     this.dx = dx;
@@ -193,16 +202,34 @@ export class CpuSolver {
     const c = dt / dx;
     const fc = this.fc;
     // Infiltration possible pendant ce pas, par m/s de capacité finale (loi de Horton)
-    const capDt = fc && rainDepth > 0 ? dt * (1 + (this.m0 - 1) * Math.exp(-cumP / HORTON_P)) : 0;
+    let capDt = fc && rainDepth > 0 ? dt * (1 + (this.m0 - 1) * Math.exp(-cumP / HORTON_P)) : 0;
+    const rz = this.rz;
+    if (rz) {
+      // Pluie de chaque bloc pendant ce pas (m), cumul au milieu du pas (mm), infiltration possible
+      for (let z = 0; z < rz.nz; z++) {
+        const a = zoneCum(rz, z, t - dt);
+        const b = zoneCum(rz, z, t);
+        this.zD[z] = (b - a) / 1000;
+        this.zC[z] = 0.5 * (a + b);
+        this.zCap[z] = fc ? dt * (1 + (this.m0 - 1) * Math.exp(-this.zC[z] / HORTON_P)) : 0;
+      }
+    }
     let hm = 0;
     let rain = 0;
     for (let j = 0; j < ny; j++) {
+      const zRow = rz ? Math.floor(j / rz.bj) * rz.nzx : 0;
       for (let i = 0; i < nx; i++) {
         const k = j * nx + i;
         const fx = j * (nx + 1) + i;
         const fy = j * nx + i;
         let hn = h[k] + c * (qx[fx] - qx[fx + 1] + qy[fy] - qy[fy + nx]);
         const s = S[k];
+        if (rz) {
+          const zz = zRow + this.zoneCol[i];
+          rainDepth = this.zD[zz];
+          cumP = this.zC[zz];
+          capDt = this.zCap[zz];
+        }
         if (rainDepth > 0 && s >= 0) {
           const x = cumP - IA_RATIO * s;
           let r = x > 0 ? rainDepth * (1 - (s * s) / ((x + s) * (x + s))) : 0;
