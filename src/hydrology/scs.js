@@ -19,7 +19,7 @@ export const IA_RATIO = 0.2;
  */
 export const FC_MM_H = [30, 15, 7, 3]; // sol nu ou peu couvert ; ordres de grandeur des conductivités à saturation
 export const HORTON_P = 20; // mm
-export const hortonM0 = (amc) => (amc === 3 ? 1.5 : 3);
+export const hortonM0 = (amc) => (amc <= 2 ? 3 : amc >= 3 ? 1.5 : 3 - 1.5 * (amc - 2));
 /** Capacité « illimitée » quand le plafond est désactivé (m/s). */
 export const NO_CAP = 1e9;
 /** Capacité d'infiltration (m/s) pour fc (m/s) et une pluie cumulée P (mm). */
@@ -28,9 +28,12 @@ export const infiltrationCap = (fc, P, m0) => fc * (1 + (m0 - 1) * Math.exp(-P /
 /** Ajuste le CN selon l'humidité initiale du sol (AMC I = sec, II = normal, III = humide). */
 export function adjustCn(cn, amc) {
   if (cn >= 99) return cn;
-  if (amc === 1) return cn / (2.281 - 0.01281 * cn);
-  if (amc === 3) return cn / (0.427 + 0.00573 * cn);
-  return cn;
+  const c1 = cn / (2.281 - 0.01281 * cn);
+  const c3 = cn / (0.427 + 0.00573 * cn);
+  // Humidité continue (épisodes réels) : interpolation entre les classes I, II et III
+  if (amc <= 1) return c1;
+  if (amc >= 3) return c3;
+  return amc < 2 ? c1 + (cn - c1) * (amc - 1) : cn + (c3 - cn) * (amc - 2);
 }
 
 export function retentionMm(cn) {

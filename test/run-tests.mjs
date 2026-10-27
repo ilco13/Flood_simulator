@@ -7,7 +7,7 @@ import { CpuSolver } from '../src/sim/cpuSolver.js';
 import { buildGauges, prepareTerrain } from '../src/sim/model.js';
 import { rasterizeLine } from '../src/data/rivers.js';
 import { floodQuantiles } from '../src/hydrology/flood.js';
-import { yearsOf, arealHourly, rainWindow, amcFromAntecedent, antecedentIndex, episodeScores, parisDayStart } from '../src/hydrology/episode.js';
+import { amcIndex, yearsOf, arealHourly, rainWindow, amcFromAntecedent, antecedentIndex, episodeScores, parisDayStart } from '../src/hydrology/episode.js';
 import { parseFlowCsv, topFloods } from '../src/data/hydro.js';
 import { runMetrics, analyseComparison, diffCodes, durationAbove } from '../src/sim/compare.js';
 import { drainageLabels, basinMask, accumulation, upstreamMask, flowDirections } from '../src/hydrology/terrain.js';
@@ -320,6 +320,11 @@ await test('épisode réel : pluie moyenne, fenêtre, humidité du sol, écarts 
   hist[30 * 24 - 1] = 10;
   hist[20 * 24 - 1] = 10;
   assert.ok(Math.abs(antecedentIndex(hist, 31 * 24) - (10 * 0.9 + 10 * 0.9 ** 11)) < 1e-6);
+  // Humidité continue : 1, 2 et 3 aux points d'appui, sans saut ; CN interpolé exact aux classes
+  assert.equal(amcIndex(10, 12), 1);
+  assert.ok(Math.abs(amcIndex(41, 12) - 2) < 1e-9 && amcIndex(84, 12) === 3);
+  assert.ok(Math.abs(amcIndex(56.5, 12) - amcIndex(55.5, 12)) < 0.05, 'pas de saut au seuil');
+  assert.ok(Math.abs(adjustCn(70, 2) - 70) < 1e-9 && adjustCn(70, 2.5) > 70 && adjustCn(70, 2.5) < adjustCn(70, 3));
   assert.equal(amcFromAntecedent(20, 1), 1);
   assert.equal(amcFromAntecedent(45, 11), 2);
   assert.equal(amcFromAntecedent(60, 12), 3);

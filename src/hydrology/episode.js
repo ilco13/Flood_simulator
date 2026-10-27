@@ -92,6 +92,22 @@ export function antecedentIndex(a, s, days = 30, k = 0.9) {
  * SCS des 5 jours (13 / 28 mm hors saison de végétation, 36 / 53 mm en saison) multipliés par 2,
  * l'indice cumulant l'équivalent d'environ 10 jours de pluie (somme des poids 0,9^n sur 30 jours).
  */
+/**
+ * Humidité du sol continue, de 1 (sec) à 3 (saturé), pour éviter les sauts de part et d'autre
+ * d'un seuil : 1 jusqu'à la moitié du seuil bas, 2 au milieu des deux seuils, 3 à 1,5 fois le
+ * seuil haut, linéaire entre ces points.
+ */
+export function amcIndex(mm, month) {
+  const growing = month >= 4 && month <= 10;
+  const [lo, hi] = growing ? [72, 106] : [26, 56];
+  const a = 0.5 * lo;
+  const m = 0.5 * (lo + hi);
+  const b = 1.5 * hi;
+  if (mm <= a) return 1;
+  if (mm >= b) return 3;
+  return mm < m ? 1 + (mm - a) / (m - a) : 2 + (mm - m) / (b - m);
+}
+
 export function amcFromAntecedent(mm, month) {
   const growing = month >= 4 && month <= 10;
   const [lo, hi] = growing ? [72, 106] : [26, 56];

@@ -217,7 +217,7 @@ export function updateRainInfo() {
       classes: state.data.classes,
       spc: state.data.spc,
       soilGroup: p.soil,
-      amc: p.amc,
+      amc: p.amcIdx ?? p.amc,
       rainOnBasinOnly: true,
       cnFactor: p.cnFactor,
       capInfiltration: p.capInf,

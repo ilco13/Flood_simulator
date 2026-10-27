@@ -55,6 +55,8 @@ export function setupUi() {
   };
   seg('amc', (v) => {
     state.amc = Number(v);
+    // Épisode réel : la classe choisie remplace l'humidité continue calculée
+    if (state.episode) state.episode.amcForced = true;
     updateRainInfo();
   });
   $('show-max').onclick = () => {

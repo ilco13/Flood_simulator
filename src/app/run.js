@@ -217,7 +217,7 @@ async function runOnce(opts = {}) {
       classes: data.classes,
       spc: data.spc,
       soilGroup: p.soil,
-      amc: p.amc,
+      amc: p.amcIdx ?? p.amc,
       rainOnBasinOnly: !!data.mask,
       cnFactor: p.cnFactor,
       capInfiltration: p.capInf,
