@@ -36,8 +36,10 @@ But : mailles de 1–2 m autour du lieu en quelques minutes.
 
 - [x] Calcul emboîté : tout le bassin à maille grossière (25–50 m), débits enregistrés à l'entrée d'un carré de 1–2 km autour du lieu, puis ce carré recalculé finement (1–5 m)
 - [ ] Pas de temps par zone : grands pas dans les zones calmes, petits dans les zones profondes (supprime aussi les petits écarts vus dans les ravins quand une rivière profonde est simulée)
+  - Reporté : gain surtout quand une rivière profonde est dans la zone ; le calcul en deux temps réduit déjà le besoin.
 - [ ] Calcul processeur sur plusieurs cœurs (appareils sans carte graphique)
-- [ ] Chargement à la demande de la 3D, de la comparaison et de la coupe (démarrage plus rapide sur téléphone)
+  - Reporté : demande une isolation de la page que GitHub Pages ne permet pas sans contournement (risque de casser les fonds de carte IGN) ; utile seulement sans carte graphique (WebGPU est désormais courant).
+- [x] Chargement : bibliothèques (MapLibre, proj4) dans des fichiers à part, gardés en cache d'une version à l'autre (163 Ko à retélécharger au lieu de 1,2 Mo) ; le chargement à la demande de la 3D, de la comparaison et de la coupe ne gagnerait que ≈ 4 % (MapLibre = 77 % du code, nécessaire dès l'ouverture)
 - [ ] Vérifier : même résultat au point étudié (±5 %) qu'un calcul fin sur tout le bassin, au moins 5 fois plus vite
   - Mesuré sur la Torse (80 mm en 1 h), référence 10 m d'un seul tenant : bassin 25 m + zone 2 km à 10 m → −6 %, 7 fois plus vite ; à maille égale → −2 % (couplage fidèle). L'écart restant vient de la maille du bassin.
 - [x] Lit des cours d'eau : frottement d'un lit naturel (et non de la ripisylve) — résultats beaucoup moins dépendants de la maille
