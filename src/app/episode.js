@@ -4,7 +4,7 @@
 
 import { stationsIn, dailyMax, topFloods, episodeFlows, parseFlowCsv } from '../data/hydro.js';
 import { drawChart } from '../ui/chart.js';
-import { localDay, parisDayStart, arealHourly, rainWindow, amcFromAntecedent, episodeScores } from '../hydrology/episode.js';
+import { localDay, parisDayStart, arealHourly, rainWindow, amcFromAntecedent, antecedentIndex, episodeScores } from '../hydrology/episode.js';
 import { $, fmtNum, state } from './core.js';
 import { departmentsAround, fetchRainRef } from './rainRef.js';
 import { studyPlace, saveStudy, showStudy, renderStudy, autoResForStudy } from './study.js';
@@ -175,12 +175,14 @@ async function replay(st, flood) {
     for (let k = Math.max(0, win.s - 120); k < win.s; k++) ante += a[k];
     for (let k = Math.max(0, win.s - 720); k < win.s; k++) ante30 += a[k];
     const month = Number(flood.date.slice(5, 7));
-    const amc = amcFromAntecedent(ante, month);
+    // Humidité du sol : indice des pluies des 30 jours précédents (le plus récent compte plus)
+    const api = antecedentIndex(a, win.s);
+    const amc = amcFromAntecedent(api, month);
     const hourly = Array.from(a.slice(win.s, win.e), (v) => Math.round(v * 100) / 100);
     const total = hourly.reduce((x, y) => x + y, 0);
     const simT0 = t0 + win.s * 3600e3;
     const obs = await episodeFlows(st.code, localDay(simT0 - 864e5), localDay(simT0 + (hourly.length + 48) * 3600e3)).catch(() => ({ daily: [], curve: null }));
-    state.episode = { station: st, flood, t0: simT0, hourly, total, ante, ante30, amc, stations: good.map((x) => ({ name: x.name, d: x.d })), obs, csv: null, cand: c.name, ratio };
+    state.episode = { station: st, flood, t0: simT0, hourly, total, ante, ante30, api, amc, stations: good.map((x) => ({ name: x.name, d: x.d })), obs, csv: null, cand: c.name, ratio };
     // Panneau : pluie de l'épisode (non modifiable), humidité du sol proposée
     $('rain-mm').value = Math.round(total);
     $('rain-h').value = hourly.length;
@@ -206,7 +208,7 @@ function renderEpisodeInfo() {
     `<strong>Crue du ${fmtDay(ep.flood.date)}</strong> à ${escHtml(ep.station.name)} : ${fmtNum(ep.flood.q, ep.flood.q < 10 ? 1 : 0)} m³/s mesurés (maximum du jour). ` +
     `Pluie moyenne sur le bassin : <strong>${fmtNum(ep.total)} mm en ${ep.hourly.length} h</strong> (pointe ${fmtNum(peak, 1)} mm en une heure), à partir du ${fmtWhen(ep.t0)}, ` +
     `d'après ${ep.stations.length} station${ep.stations.length > 1 ? 's' : ''} Météo-France (${ep.stations.slice(0, 4).map((x) => escHtml(x.name)).join(', ')}${ep.stations.length > 4 ? '…' : ''}). ` +
-    `5 jours avant : ${fmtNum(ep.ante)} mm → <strong>${AMC[ep.amc]}</strong> (modifiable ; 30 jours avant : ${fmtNum(ep.ante30)} mm). ` +
+    `Pluies antérieures : ${fmtNum(ep.ante)} mm en 5 jours, ${fmtNum(ep.ante30)} mm en 30 jours (indice ${fmtNum(ep.api)} mm) → <strong>${AMC[ep.amc]}</strong> (modifiable). ` +
     (Math.abs(Math.log(ep.ratio)) > 0.2 ? `<span class="warn">Bassin trouvé ${fmtNum(ep.ratio * ep.station.areaKm2)} km² pour ${fmtNum(ep.station.areaKm2)} km² annoncés par la station.</span> ` : '') +
     (ep.obs.curve ? 'Courbe de débit mesurée disponible (crue récente). ' : 'Débits mesurés : maximum et moyenne de chaque jour ; pour la courbe complète, importez un export HydroPortail. ') +
     'Lancez la simulation pour comparer.';

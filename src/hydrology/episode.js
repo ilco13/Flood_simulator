@@ -66,6 +66,21 @@ export function rainWindow(a, from, maxH = 48) {
 }
 
 /** Humidité du sol d'après la pluie des 5 jours précédents (seuils SCS, saison de végétation ou non). */
+/**
+ * Indice de pluies antérieures (mm) : pluie de chacun des `days` jours précédant l'heure `s`,
+ * pondérée par k^(n−1) pour le n-ième jour avant (le sol sèche peu à peu) ; voit une période
+ * pluvieuse de plusieurs semaines que la règle des 5 jours ignore.
+ */
+export function antecedentIndex(a, s, days = 30, k = 0.9) {
+  let api = 0;
+  for (let n = 1; n <= days; n++) {
+    let day = 0;
+    for (let h = s - n * 24; h < s - (n - 1) * 24; h++) if (h >= 0) day += a[h];
+    api += day * k ** (n - 1);
+  }
+  return api;
+}
+
 export function amcFromAntecedent(mm, month) {
   const growing = month >= 4 && month <= 10;
   const [lo, hi] = growing ? [36, 53] : [13, 28];

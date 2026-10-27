@@ -7,7 +7,7 @@ import { CpuSolver } from '../src/sim/cpuSolver.js';
 import { buildGauges, prepareTerrain } from '../src/sim/model.js';
 import { rasterizeLine } from '../src/data/rivers.js';
 import { floodQuantiles } from '../src/hydrology/flood.js';
-import { arealHourly, rainWindow, amcFromAntecedent, episodeScores, parisDayStart } from '../src/hydrology/episode.js';
+import { arealHourly, rainWindow, amcFromAntecedent, antecedentIndex, episodeScores, parisDayStart } from '../src/hydrology/episode.js';
 import { parseFlowCsv, topFloods } from '../src/data/hydro.js';
 import { runMetrics, analyseComparison, diffCodes, durationAbove } from '../src/sim/compare.js';
 import { drainageLabels, basinMask, accumulation, upstreamMask, flowDirections } from '../src/hydrology/terrain.js';
@@ -315,6 +315,11 @@ await test('épisode réel : pluie moyenne, fenêtre, humidité du sol, écarts 
   // Fenêtre : du début à la fin de la pluie (2 % – 98 %), une heure avant
   const w = rainWindow(Float32Array.from([5, 0, 0, 0, 1, 20, 30, 10, 0, 0]), 2);
   assert.deepEqual(w, { s: 4, e: 8 });
+  // Indice de pluies antérieures : 10 mm la veille comptent 10, 10 mm il y a 11 jours comptent 10 × 0,9^10
+  const hist = new Float32Array(31 * 24);
+  hist[30 * 24 - 1] = 10;
+  hist[20 * 24 - 1] = 10;
+  assert.ok(Math.abs(antecedentIndex(hist, 31 * 24) - (10 * 0.9 + 10 * 0.9 ** 11)) < 1e-6);
   assert.equal(amcFromAntecedent(10, 1), 1);
   assert.equal(amcFromAntecedent(60, 7), 3);
   assert.equal(amcFromAntecedent(40, 7), 2);
