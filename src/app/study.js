@@ -1,3 +1,4 @@
+import { applyCalibNear } from './episode.js';
 import { fitBoundsOf, setGeoJson } from '../map.js';
 import { toL93, toWgs } from '../geo.js';
 import { avalSettings, mainReceiver, renderAval } from './aval.js';
@@ -191,6 +192,7 @@ export function studyPlace(lng, lat) {
       describeRes();
       fetchSoil();
       fetchRainRef();
+      applyCalibNear();
       if (window.matchMedia('(max-width: 760px)').matches) $('panel').classList.remove('collapsed');
     } else if (m.type === 'error') {
       end();

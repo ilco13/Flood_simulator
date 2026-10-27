@@ -96,6 +96,26 @@
             <div id="rain-ref" class="rain-ref"></div>
             <canvas id="hyeto" class="chart small" aria-label="Hyétogramme"></canvas>
             <p id="rain-info" class="hint"></p>
+            <details id="episode-box" class="episode-box">
+              <summary>Rejouer une crue mesurée</summary>
+              <p class="hint">
+                Une station de mesure des débits proche du lieu, l'une de ses plus fortes crues, et les pluies tombées
+                heure par heure (stations Météo-France) : pour comparer le simulateur à la réalité, et le caler.
+              </p>
+              <button id="ep-find" class="ghost" type="button">Chercher les stations de mesure proches</button>
+              <ul id="ep-stations" class="ep-list"></ul>
+              <ul id="ep-floods" class="ep-list"></ul>
+              <div id="ep-active" hidden>
+                <p id="ep-info" class="hint"></p>
+                <label class="ghost file-btn">Importer la courbe de débit mesurée (CSV HydroPortail)<input type="file" id="ep-csv" accept=".csv,.txt" hidden /></label>
+                <p id="ep-info2" class="hint"></p>
+                <div class="btn-row wrap">
+                  <button id="ep-calib" class="ghost" type="button">Caler le modèle sur cette crue</button>
+                  <button id="ep-quit" class="ghost" type="button">Quitter l'épisode</button>
+                </div>
+                <div id="ep-calib-info" class="hint"></div>
+              </div>
+            </details>
           </section>
 
           <section>
@@ -107,6 +127,7 @@
               <button data-v="3" role="radio">Saturé</button>
             </div>
             <p id="soil-info" class="hint"></p>
+            <p id="calib-note" class="hint"></p>
           </section>
 
           <section>
@@ -203,7 +224,7 @@
                 Limiter l'infiltration selon l'intensité de la pluie
               </label>
               <p class="hint">Un sol n'absorbe qu'un certain débit (de quelques mm/h en sol argileux ou cultivé à plusieurs dizaines sous forêt), même s'il n'est pas plein : sous un orage violent, l'excédent ruisselle, que le sol soit sec ou non. Décocher pour la méthode SCS seule (cumul de pluie uniquement).</p>
-              <label>Calage : multiplicateur de la rétention du sol
+              <label>Calage : capacité d'absorption du sol (× rétention et infiltration ; 1 = sans calage)
                 <input id="cnf" type="number" inputmode="decimal" value="1" min="0.2" max="3" step="0.1" />
               </label>
               <label>Moteur de calcul
@@ -298,6 +319,12 @@
               <button id="section-clear" class="ghost" type="button" disabled>Effacer</button>
             </div>
             <p id="section-hint" class="hint">Touchez « Placer une coupe » puis la carte (par exemple dans le lit du cours d’eau).</p>
+            <details id="ep-compare-box" class="summary-box" hidden>
+              <summary>Comparaison aux débits mesurés</summary>
+              <canvas id="ep-chart" class="chart" aria-label="Débits simulés et mesurés"></canvas>
+              <div class="legend static"><span><i style="background:#1c7ed6"></i>Simulé</span><span><i style="background:#212529"></i>Mesuré</span><span><i style="background:#868e96"></i>Maximum mesuré du jour</span></div>
+              <p id="ep-stats" class="hint"></p>
+            </details>
             <details class="summary-box">
               <summary>Bilan du calcul</summary>
               <p id="summary" class="hint"></p>

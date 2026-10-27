@@ -8,6 +8,7 @@ import { setGeoJson, setWaterCanvas } from '../map.js';
 import { simulate } from '../sim/driver.js';
 import { AVAL_RAMP, inflowCells, mainReceiver } from './aval.js';
 import { nestBox, boundaryGauges, nestSources } from './nest.js';
+import { renderEpisodeCompare } from './episode.js';
 import { escHtml } from './compareUi.js';
 import { $, CPU_CELL_CAP, GPU_CELL_CAP, fmtH, fmtNum, state } from './core.js';
 import { ensureWater3d } from './mapUi.js';
@@ -399,7 +400,7 @@ export function runCpu(run, model, p, totalTime, snapshotEvery, cb) {
       type: 'run',
       model,
       gauges: (run.solverGauges || run.gauges).map(({ cells, wx, wy, signed }) => ({ cells, wx, wy, signed })),
-      rain: { totalMm: p.rainMm, durationH: p.rainH, shape: p.shape },
+      rain: { totalMm: p.rainMm, durationH: p.rainH, shape: p.shape, hourly: p.hourly },
       options: { totalTime, gaugeEvery: run.gaugeEvery ?? 300, snapshotEvery },
     });
   });
@@ -475,5 +476,6 @@ export function finishRun(run, mass) {
   drawHydro();
   if (state.probe) probeAt(state.probe);
   run.userStopped = stopped;
+  if (run.params.episode) renderEpisodeCompare(run);
   run.saveP = autoSave(run, stopped);
 }

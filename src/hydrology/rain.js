@@ -17,7 +17,8 @@ export const MONTANA_B = 0.433;
  * Double triangle (Desbordes) : un triangle « de fond » sur toute la durée et un triangle
  * intense de durée d = D/6 contenant la moitié du cumul, centré sur la position de pointe.
  */
-export function makeHyetograph({ totalMm, durationH, shape = 'desbordes', montanaB = MONTANA_B }) {
+export function makeHyetograph({ totalMm, durationH, shape = 'desbordes', montanaB = MONTANA_B, hourly = null }) {
+  if (shape === 'observed' && hourly?.length) return observed(hourly);
   const D = durationH * 3600;
   const P = totalMm;
   if (shape === 'chicago') return chicago(P, D, montanaB);
@@ -98,5 +99,28 @@ function chicago(P, D, b) {
     peakMmH() {
       return ((cumulative(tp + 180) - cumulative(tp - 180)) / 360) * 3600;
     },
+  };
+}
+
+/**
+ * Pluie observée heure par heure (épisode réel) : hauteur constante dans chaque heure.
+ * @param hourly mm tombés pendant chaque heure, depuis t = 0
+ */
+export function observed(hourly) {
+  const n = hourly.length;
+  const cum = new Float64Array(n + 1);
+  for (let k = 0; k < n; k++) cum[k + 1] = cum[k] + Math.max(0, hourly[k] || 0);
+  const D = n * 3600;
+  return {
+    durationS: D,
+    totalMm: cum[n],
+    intensity: (t) => (t < 0 || t >= D ? 0 : Math.max(0, hourly[Math.floor(t / 3600)] || 0)),
+    cumulative: (t) => {
+      if (t <= 0) return 0;
+      if (t >= D) return cum[n];
+      const k = Math.floor(t / 3600);
+      return cum[k] + (cum[k + 1] - cum[k]) * (t / 3600 - k);
+    },
+    peakMmH: () => Math.max(0, ...hourly),
   };
 }

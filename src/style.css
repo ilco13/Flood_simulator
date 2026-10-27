@@ -1502,3 +1502,37 @@ details.advanced h3 {
 .aval-box .row2 {
   margin-top: 4px;
 }
+
+/* Rejouer une crue mesurée */
+.episode-box {
+  margin-top: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+.episode-box > summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13.5px;
+}
+.ep-list {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0;
+  font-size: 13px;
+}
+.ep-list li {
+  padding: 3px 0;
+  border-bottom: 1px solid var(--line);
+}
+.ep-list li.lbl {
+  border: 0;
+  font-weight: 600;
+  margin-top: 6px;
+}
+.ep-list small {
+  color: var(--muted);
+}
+.cmp-table tr.best td {
+  background: color-mix(in srgb, #2b8a3e 16%, transparent);
+  font-weight: 600;
+}

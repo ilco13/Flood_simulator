@@ -7,6 +7,7 @@ import { meanRunoff, meanRunoffHyeto, runoffMm } from '../hydrology/scs.js';
 import { stableDt } from '../sim/scheme.js';
 import { avalParams } from './aval.js';
 import { nestBox } from './nest.js';
+import { episodeParams } from './episode.js';
 import { $, CPU_CELL_CAP, GPU_CELL_CAP, STUDY_RESOLUTIONS, fmtNum, state } from './core.js';
 import { autoResForStudy, renderStudy, studyCands, studyFrame } from './study.js';
 
@@ -28,6 +29,8 @@ export function params() {
     cnFactor: Math.max(0.1, Number($('cnf').value) || 1),
     capInf: $('cap-inf').checked,
     nest: $('nest-on').checked ? { radius: Number($('nest-r').value), res: Number($('nest-res').value) } : null,
+    // Épisode réel chargé : pluie observée heure par heure à la place de la pluie de projet
+    ...episodeParams(),
     bdtopo: $('bati-ign').checked,
     ...avalParams(),
     engine: $('engine').value,
@@ -41,7 +44,7 @@ export function soilGroup() {
 }
 
 export function hyetoOf(p) {
-  return makeHyetograph({ totalMm: p.rainMm, durationH: p.rainH, shape: p.shape });
+  return makeHyetograph({ totalMm: p.rainMm, durationH: p.rainH, shape: p.shape, hourly: p.hourly });
 }
 
 /** Grille de calcul : bassins versants retenus autour du lieu étudié. */

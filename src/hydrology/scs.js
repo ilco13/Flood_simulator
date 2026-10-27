@@ -58,7 +58,8 @@ export function runoffRate(P, S) {
  * @param mask     1 = la pluie tombe sur cette maille (bassin versant), 0 sinon ; null = partout
  * @param soilGroup 0..3 pour A..D
  * @param amc      1, 2 ou 3
- * @param cnFactor multiplicateur global de calage sur S (1 = sans calage)
+ * @param cnFactor multiplicateur global de calage de la capacité d'absorption du sol : rétention S
+ *                 et capacité d'infiltration (1 = sans calage)
  */
 export function buildRunoffFields(classes, mask, soilGroup, amc, cnFactor = 1, spc = 1, capInfiltration = true) {
   const n = classes.length / spc;
@@ -77,7 +78,7 @@ export function buildRunoffFields(classes, mask, soilGroup, amc, cnFactor = 1, s
       nm += nByClass[classes[m]];
       f += fcByClass[classes[m]];
     }
-    fc[k] = f / spc;
+    fc[k] = (f / spc) * cnFactor;
     S[k] = mask && !mask[k] ? -1 : retentionMm(cn / spc) * cnFactor;
     manning[k] = nm / spc;
   }

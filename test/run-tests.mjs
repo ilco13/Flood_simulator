@@ -7,6 +7,8 @@ import { CpuSolver } from '../src/sim/cpuSolver.js';
 import { buildGauges, prepareTerrain } from '../src/sim/model.js';
 import { rasterizeLine } from '../src/data/rivers.js';
 import { floodQuantiles } from '../src/hydrology/flood.js';
+import { arealHourly, rainWindow, amcFromAntecedent, episodeScores, parisDayStart } from '../src/hydrology/episode.js';
+import { parseFlowCsv, topFloods } from '../src/data/hydro.js';
 import { runMetrics, analyseComparison, diffCodes, durationAbove } from '../src/sim/compare.js';
 import { drainageLabels, basinMask, accumulation, upstreamMask, flowDirections } from '../src/hydrology/terrain.js';
 
@@ -300,6 +302,40 @@ await test('débits de crue estimés (CRUPEDIX + gradex)', () => {
   assert.ok(a.q100 > 1.5 * a.q10 && a.q100 < 5 * a.q10, `rapport Q100/Q10 ${(a.q100 / a.q10).toFixed(2)}`);
   const b = floodQuantiles(1000, 80, 120);
   assert.ok(b.q10 > a.q10 && b.q100 > a.q100, 'croît avec la surface');
+});
+
+await test('épisode réel : pluie moyenne, fenêtre, humidité du sol, écarts aux mesures', () => {
+  // Pluie observée heure par heure
+  const h = makeHyetograph({ shape: 'observed', hourly: [0, 2, 10, 4] });
+  assert.equal(h.totalMm, 16);
+  assert.ok(Math.abs(h.cumulative(2.5 * 3600) - 7) < 1e-9 && h.peakMmH() === 10);
+  // Moyenne pondérée par la distance, heures manquantes ignorées
+  const a = arealHourly([{ d: 0, rr: Float32Array.of(10, NaN) }, { d: 9, rr: Float32Array.of(0, 4) }], 2);
+  assert.ok(Math.abs(a[0] - 10 * 1 / (1 + 0.01)) < 1e-6 && Math.abs(a[1] - 4) < 1e-6);
+  // Fenêtre : du début à la fin de la pluie (2 % – 98 %), une heure avant
+  const w = rainWindow(Float32Array.from([5, 0, 0, 0, 1, 20, 30, 10, 0, 0]), 2);
+  assert.deepEqual(w, { s: 4, e: 8 });
+  assert.equal(amcFromAntecedent(10, 1), 1);
+  assert.equal(amcFromAntecedent(60, 7), 3);
+  assert.equal(amcFromAntecedent(40, 7), 2);
+  // Heure d'été : le jour commence à 22 h TU la veille
+  assert.equal(new Date(parisDayStart('2019-07-01')).toISOString(), '2019-06-30T22:00:00.000Z');
+  assert.equal(new Date(parisDayStart('2019-12-01')).toISOString(), '2019-11-30T23:00:00.000Z');
+  // Écarts : pic simulé 90 contre 100 mesurés
+  const t0 = parisDayStart('2019-12-01');
+  const run = { gauges: [{ id: 'study0' }], series: [[[0, 0], [43200, 90], [86400 * 2, 0]]] };
+  const ep = { t0, obs: { daily: [{ date: '2019-11-30', max: 5, mean: 5 }, { date: '2019-12-01', max: 100, mean: 40 }, { date: '2019-12-02', max: 20, mean: 10 }], curve: null }, csv: null };
+  const r = episodeScores(run, ep);
+  assert.ok(Math.abs(r.peakErr + 10) < 1e-9, `écart de pic ${r.peakErr}`);
+  assert.equal(r.obsPeakDay, '2019-12-01');
+  assert.ok(r.volErr != null);
+  // Export HydroPortail en l/s
+  const c = parseFlowCsv('Date (TU);Valeur (en l/s)\n23/11/2019 14:00;142609\n23/11/2019 15:00;150000');
+  assert.equal(c.length, 2);
+  assert.ok(Math.abs(c[0][1] - 142.609) < 1e-9 && c[0][0] === Date.parse('2019-11-23T14:00:00Z'));
+  // Crues distinctes (5 jours d'écart au moins)
+  const top = topFloods([['2008-12-14', 176], ['2008-12-15', 155], ['2019-11-23', 143]], 3);
+  assert.deepEqual(top.map((x) => x.date), ['2008-12-14', '2019-11-23']);
 });
 
 await test('comparaison : indicateurs, analyse et carte des écarts', () => {

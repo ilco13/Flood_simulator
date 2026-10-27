@@ -1,3 +1,4 @@
+import { setupEpisode } from './episode.js';
 import { PALETTES, RUNOFF, SCALES, buildLut, flowLegendStops, legendStops } from '../render/water.js';
 import { SHAPES } from '../hydrology/rain.js';
 import { cacheClear } from '../data/cache.js';
@@ -118,6 +119,7 @@ export function setupUi() {
   $('play').onclick = togglePlay;
   setupSection();
   setupCompare();
+  setupEpisode();
   setupAval();
   setupCatchment();
   setupSearch();
