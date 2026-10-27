@@ -40,28 +40,29 @@ async function departmentFiles(dep) {
     }
   }
   if (index) return index.urls.filter((u) => u.includes(`/H_${dep}_`)).map(mirror);
-  // Noms devinés : décennies, puis « previous » et « latest » (ils suivent l'année en cours)
+  // Noms devinés (décennies, puis « previous » et « latest », qui suivent l'année en cours) :
+  // tous essayés à la lecture, les absents (404) sont simplement ignorés.
   const y = new Date().getFullYear();
   const out = [];
   for (let d = 1950; d < 2020; d += 10) out.push(`${BASE}H_${dep}_${d}-${d + 9}.csv.gz`);
-  for (const Y of [y - 2, y - 1, y - 3]) {
-    const prev = `${BASE}H_${dep}_previous-2020-${Y}.csv.gz`;
-    try {
-      if ((await fetch(prev, { method: 'HEAD' })).ok) {
-        out.push(prev, `${BASE}H_${dep}_latest-${Y + 1}-${Y + 2}.csv.gz`);
-        break;
-      }
-    } catch {
-      /* hors ligne */
-    }
-  }
+  for (const Y of [y - 1, y - 2, y - 3]) out.push(`${BASE}H_${dep}_previous-2020-${Y}.csv.gz`, `${BASE}H_${dep}_latest-${Y + 1}-${Y + 2}.csv.gz`);
   return out;
 }
 
 const stamp = (d) => `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}${String(d.getUTCHours()).padStart(2, '0')}`;
 
 async function readFile(url, q, stations, onBytes) {
-  const res = await fetch(url);
+  let res;
+  for (let a = 0; a < 3; a++) {
+    try {
+      res = await fetch(url);
+      break;
+    } catch (e) {
+      if (a === 2) throw e;
+      await new Promise((r) => setTimeout(r, 3000 * (a + 1)));
+    }
+  }
+  if (res.status === 404) return false; // nom deviné qui n'existe pas
   if (!res.ok) throw new Error(`Météo-France HTTP ${res.status}`);
   const total = Number(res.headers.get('content-length')) || 0;
   let got = 0;
@@ -129,6 +130,7 @@ async function readFile(url, q, stations, onBytes) {
     rest = text.slice(start);
   }
   handle(rest);
+  return true;
 }
 
 /**
@@ -153,8 +155,17 @@ self.onmessage = async (e) => {
         const ys = yearsOf(u);
         return ys && ys[1] >= y0 && ys[0] <= y1;
       });
-      for (const url of files)
-        await readFile(url, q, stations, (got, total) => post('progress', { dep: deps[i], k: i + 1, n: deps.length, mb: got / 1e6, totalMb: total / 1e6 }));
+      // Années couvertes par un fichier déjà lu (les noms devinés peuvent se recouvrir)
+      const done = [];
+      for (const url of files) {
+        const ys = yearsOf(url);
+        if (done.some(([a, b]) => a <= Math.max(ys[0], y0) && b >= Math.min(ys[1], y1))) continue;
+        try {
+          if (await readFile(url, q, stations, (got, total) => post('progress', { dep: deps[i], k: i + 1, n: deps.length, mb: got / 1e6, totalMb: total / 1e6 }))) done.push(ys);
+        } catch (err) {
+          console.warn('Fichier Météo-France illisible', url, err);
+        }
+      }
       // Assez de stations avec des données : inutile de lire les départements voisins.
       const good = [...stations.values()].filter((s) => s.d <= 15 && s.rr.some((v) => v >= 0)).length;
       if (good >= 3) break;
