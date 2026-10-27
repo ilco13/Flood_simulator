@@ -108,6 +108,14 @@ export function amcIndex(mm, month) {
   return mm < m ? 1 + (mm - a) / (m - a) : 2 + (mm - m) / (b - m);
 }
 
+/**
+ * Humidité du modèle (1 sec à 3 saturé) d'après la part de saturation de la zone des racines
+ * (NASA POWER, 0–1) : 0,45 → 1, 0,65 → 2, 0,85 → 3, linéaire entre ces points.
+ */
+export function amcFromWetness(g) {
+  return Math.min(3, Math.max(1, 1 + (g - 0.45) / 0.2));
+}
+
 export function amcFromAntecedent(mm, month) {
   const growing = month >= 4 && month <= 10;
   const [lo, hi] = growing ? [72, 106] : [26, 56];

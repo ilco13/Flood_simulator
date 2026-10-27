@@ -1,4 +1,6 @@
 import { toWgs } from '../geo.js';
+import { rootWetness } from '../data/soilMoisture.js';
+import { amcFromWetness } from '../hydrology/episode.js';
 import { $, fmtNum, state } from './core.js';
 import { updateRainInfo } from './params.js';
 import { fetchWithTimeout } from './saved.js';
@@ -92,4 +94,45 @@ export function renderSoilInfo() {
       `(argile ${fmtNum(soil.clay)} %${soil.sand != null ? `, sable ${fmtNum(soil.sand)} %` : ''} ; SoilGrids). ` +
       'Modifiable dans les options avancées.';
   else el.textContent = 'Type de sol : moyen (texture du sol indisponible ici). Modifiable dans les options avancées.';
+}
+
+/* ---------- Humidité du sol actuelle (NASA POWER) ---------- */
+
+/**
+ * Dernière humidité mesurée de la zone des racines au lieu étudié (publiée avec quelques jours de
+ * retard) : affichée sous le choix Sec / Normal / Saturé, avec un bouton pour l'appliquer.
+ */
+export async function fetchCurrentWetness() {
+  const s = state.study;
+  const el = $('wet-info');
+  if (!s || !el) return;
+  el.textContent = 'Humidité actuelle du sol (NASA POWER)…';
+  const [lon, lat] = s.houseWgs;
+  const day = (ms) => new Date(ms).toISOString().slice(0, 10);
+  try {
+    const m = await rootWetness(lon, lat, day(Date.now() - 20 * 864e5), day(Date.now()));
+    if (state.study !== s) return;
+    const last = [...m.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1))[0];
+    if (!last) {
+      el.textContent = '';
+      return;
+    }
+    const [d, g] = last;
+    const amc = Math.min(3, Math.max(1, Math.round(amcFromWetness(g))));
+    const LBL = { 1: 'sec', 2: 'normal', 3: 'saturé' };
+    el.innerHTML =
+      `Sol mesuré le ${d.slice(8, 10)}/${d.slice(5, 7)} : <strong>${fmtNum(g * 100)} % de saturation</strong> de la zone des racines (NASA POWER, maille ≈ 50 km) → ${LBL[amc]}. ` +
+      (state.amc === amc ? '' : `<button type="button" class="chip-btn" id="wet-apply">Utiliser « ${LBL[amc]} »</button>`);
+    const b = $('wet-apply');
+    if (b)
+      b.onclick = () => {
+        state.amc = amc;
+        $('amc').querySelectorAll('button').forEach((x) => x.classList.toggle('on', Number(x.dataset.v) === amc));
+        b.remove();
+        updateRainInfo();
+      };
+  } catch (e) {
+    console.warn('Humidité actuelle indisponible', e);
+    el.textContent = '';
+  }
 }

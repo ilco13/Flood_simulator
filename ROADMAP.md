@@ -52,17 +52,19 @@ But : confronter le simulateur aux mesures et régler ses paramètres sur le ter
 - [x] Mode « Épisode historique » : une date, les pluies horaires des stations proches, le débit mesuré à la station de la rivière la plus proche
 - [x] Indicateurs d'écart simulé / mesuré : pic, heure du pic, volume, ressemblance des courbes
 - [x] Calage assisté : simulations successives sur la capacité d'absorption du sol (rétention et infiltration ; le frottement n'est pas calé) ; réglage enregistré par secteur (lieux à moins de 30 km)
-- [ ] Vérifier : sur 2–3 crues connues (Arc, un cours d'eau cévenol, Weiss), pic simulé à ±30 % du pic mesuré après calage
+- [x] Vérifier : sur 2–3 crues connues (Arc, un cours d'eau cévenol, Weiss), pic simulé à ±30 % du pic mesuré après calage
   - Calé sur chaque crue : Arc 23/11/2019 pic +15 % ; Ganière 09/09/2002 +2 % ; Weiss 14/11/2023 pic +2 % mais volume −98 % (écoulement par le sol et les nappes non représenté).
   - Transposition d'une crue à l'autre (même station, sans recaler) : Arc 14/12/2008 +66 % (volume +25 %) avec le réglage de 2019 : objectif non atteint.
   - Sans calage : Arc 2019 +16 %, Arc 2008 +66 %, Ganière −53 %.
-  - Pistes : humidité du sol mesurée (étape 4), pluie variable dans l'espace (étape 4), débit de base.
+  - Avec l'humidité du sol mesurée (étape 4) : calé sur Arc 2019 (×1,5) → +10 % ; transposé à Arc 2008 → +26 % ✓ ; Ganière calée +2 % ✓. Weiss : hors de portée du modèle (pic retrouvé mais pas le volume).
+  - Pistes : pluie variable dans l'espace (étape 4), débit de base.
 
 ## Étape 4 — Données d'entrée plus réalistes (≈ 2–3 séances)
 
 But : moins de réglages « au jugé ».
 
-- [ ] Humidité du sol du jour (indice quotidien Météo-France) : sec / normal / saturé proposé automatiquement pour une date — accès à vérifier
+- [x] Humidité du sol mesurée : l'indice quotidien Météo-France (SIM2) n'est pas lisible depuis une page (fichiers nationaux de 1,3 Go triés par point) ; remplacé par NASA POWER (réanalyse MERRA-2, part de saturation de la zone des racines, depuis 1981, maille ≈ 50 km, sans clé). Utilisé pour les crues rejouées (la veille de la pluie) et affiché pour aujourd'hui dans la section Sol (bouton pour l'appliquer). Open-Meteo (ERA5-Land, plus fin) envisageable : quota journalier par adresse, non testable depuis l'environnement de développement.
+  - Effet sur l'Arc à Meyreuil : même humidité mesurée avant les crues de 2019 et 2008 (75 %) ; calage sur 2019 → ×1,5 (pic +10 %, volume −1 %), appliqué tel quel à 2008 → pic +26 %, volume +12 % (au lieu de +66 % avec l'estimation par les pluies).
 - [ ] Pluie variable dans l'espace : pluie de chaque station répartie sur le bassin (épisodes historiques) ; radar plus tard si les données sont ouvertes
 - [ ] Ponts et buses : ouvrages repérés sur les cours d'eau étudiés, dimensions estimées ou saisies (largeur, hauteur sous tablier), débordement par-dessus la route au-delà de leur capacité (pont de l'avenue de Villelongue)
 - [ ] Rivière aval : reprendre les débits de crue décennale / centennale des stations quand ils existent, à la place de la formule

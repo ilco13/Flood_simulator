@@ -1,3 +1,4 @@
+import { fetchCurrentWetness } from './soil.js';
 import { applyCalibNear } from './episode.js';
 import { fitBoundsOf, setGeoJson } from '../map.js';
 import { toL93, toWgs } from '../geo.js';
@@ -123,6 +124,7 @@ export function restoreCatchment() {
     showStudy();
     renderStudy();
     if (!state.study.soil?.group) fetchSoil();
+    fetchCurrentWetness();
     fetchRainRef(); // résultat en cache après la première fois
   }
   renderSoilInfo();
@@ -191,6 +193,7 @@ export function studyPlace(lng, lat) {
       renderStudy();
       describeRes();
       fetchSoil();
+      fetchCurrentWetness();
       fetchRainRef();
       applyCalibNear();
       if (window.matchMedia('(max-width: 760px)').matches) $('panel').classList.remove('collapsed');

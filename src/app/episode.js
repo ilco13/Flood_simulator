@@ -4,7 +4,8 @@
 
 import { stationsIn, dailyMax, topFloods, episodeFlows, parseFlowCsv } from '../data/hydro.js';
 import { drawChart } from '../ui/chart.js';
-import { localDay, parisDayStart, arealHourly, rainWindow, amcIndex, antecedentIndex, episodeScores } from '../hydrology/episode.js';
+import { localDay, parisDayStart, arealHourly, rainWindow, amcIndex, amcFromWetness, antecedentIndex, episodeScores } from '../hydrology/episode.js';
+import { rootWetness } from '../data/soilMoisture.js';
 import { $, fmtNum, state } from './core.js';
 import { departmentsAround, fetchRainRef } from './rainRef.js';
 import { studyPlace, saveStudy, showStudy, renderStudy, autoResForStudy } from './study.js';
@@ -177,13 +178,23 @@ async function replay(st, flood) {
     const month = Number(flood.date.slice(5, 7));
     // Humidité du sol : indice des pluies des 30 jours précédents (le plus récent compte plus)
     const api = antecedentIndex(a, win.s);
-    const amcIdx = amcIndex(api, month);
+    let amcIdx = amcIndex(api, month);
+    // Humidité mesurée (NASA POWER) la veille du début de la pluie, si disponible ; sinon
+    // estimation d'après les pluies des 30 jours précédents.
+    let wet = null;
+    try {
+      const day = localDay(t0 + win.s * 3600e3 - 864e5);
+      wet = (await rootWetness(lonC, latC, day, day)).get(day) ?? null;
+    } catch (e) {
+      console.warn('Humidité NASA POWER indisponible', e);
+    }
+    if (wet != null) amcIdx = amcFromWetness(wet);
     const amc = Math.min(3, Math.max(1, Math.round(amcIdx)));
     const hourly = Array.from(a.slice(win.s, win.e), (v) => Math.round(v * 100) / 100);
     const total = hourly.reduce((x, y) => x + y, 0);
     const simT0 = t0 + win.s * 3600e3;
     const obs = await episodeFlows(st.code, localDay(simT0 - 864e5), localDay(simT0 + (hourly.length + 48) * 3600e3)).catch(() => ({ daily: [], curve: null }));
-    state.episode = { station: st, flood, t0: simT0, hourly, total, ante, ante30, api, amc, amcIdx, stations: good.map((x) => ({ name: x.name, d: x.d })), obs, csv: null, cand: c.name, ratio };
+    state.episode = { station: st, flood, t0: simT0, hourly, total, ante, ante30, api, wet, amc, amcIdx, stations: good.map((x) => ({ name: x.name, d: x.d })), obs, csv: null, cand: c.name, ratio };
     // Panneau : pluie de l'épisode (non modifiable), humidité du sol proposée
     $('rain-mm').value = Math.round(total);
     $('rain-h').value = hourly.length;
@@ -209,7 +220,10 @@ function renderEpisodeInfo() {
     `<strong>Crue du ${fmtDay(ep.flood.date)}</strong> à ${escHtml(ep.station.name)} : ${fmtNum(ep.flood.q, ep.flood.q < 10 ? 1 : 0)} m³/s mesurés (maximum du jour). ` +
     `Pluie moyenne sur le bassin : <strong>${fmtNum(ep.total)} mm en ${ep.hourly.length} h</strong> (pointe ${fmtNum(peak, 1)} mm en une heure), à partir du ${fmtWhen(ep.t0)}, ` +
     `d'après ${ep.stations.length} station${ep.stations.length > 1 ? 's' : ''} Météo-France (${ep.stations.slice(0, 4).map((x) => escHtml(x.name)).join(', ')}${ep.stations.length > 4 ? '…' : ''}). ` +
-    `Pluies antérieures : ${fmtNum(ep.ante)} mm en 5 jours, ${fmtNum(ep.ante30)} mm en 30 jours (indice ${fmtNum(ep.api)} mm) → <strong>${AMC[ep.amc]}</strong> (humidité ${fmtNum(ep.amcIdx, 2)} sur une échelle de 1 sec à 3 saturé ; un clic sur Sec / Normal / Saturé l'impose). ` +
+    (ep.wet != null
+      ? `Sol la veille : <strong>${fmtNum(ep.wet * 100)} % de saturation</strong> de la zone des racines (mesure NASA POWER) → <strong>${AMC[ep.amc]}</strong> `
+      : `Pluies antérieures : ${fmtNum(ep.ante)} mm en 5 jours, ${fmtNum(ep.ante30)} mm en 30 jours (indice ${fmtNum(ep.api)} mm ; humidité mesurée indisponible) → <strong>${AMC[ep.amc]}</strong> `) +
+    `(humidité ${fmtNum(ep.amcIdx, 2)} sur une échelle de 1 sec à 3 saturé ; un clic sur Sec / Normal / Saturé l'impose). ` +
     (Math.abs(Math.log(ep.ratio)) > 0.2 ? `<span class="warn">Bassin trouvé ${fmtNum(ep.ratio * ep.station.areaKm2)} km² pour ${fmtNum(ep.station.areaKm2)} km² annoncés par la station.</span> ` : '') +
     (ep.obs.curve ? 'Courbe de débit mesurée disponible (crue récente). ' : 'Débits mesurés : maximum et moyenne de chaque jour ; pour la courbe complète, importez un export HydroPortail. ') +
     'Lancez la simulation pour comparer.';
