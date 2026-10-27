@@ -1,6 +1,12 @@
 // Calculs d'un épisode réel (sans interface) : pluie moyenne sur le bassin, fenêtre de pluie,
 // humidité du sol avant l'épisode, écarts entre débits simulés et mesurés.
 
+/** Années couvertes par un fichier Météo-France : H_13_1990-1999, H_13_previous-2020-2024, H_13_latest-2025-2026. */
+export function yearsOf(url) {
+  const m = /[_-](\d{4})-(\d{4})\.csv\.gz$/.exec(url);
+  return m ? [Number(m[1]), Number(m[2])] : null;
+}
+
 export const localDay = (ms) => new Date(ms).toLocaleDateString('fr-CA', { timeZone: 'Europe/Paris' });
 const pct = (a, b) => (b > 0 ? ((a - b) / b) * 100 : NaN);
 
@@ -81,9 +87,14 @@ export function antecedentIndex(a, s, days = 30, k = 0.9) {
   return api;
 }
 
+/**
+ * Humidité du sol (1 sec, 2 normal, 3 saturé) d'après l'indice de pluies antérieures : seuils
+ * SCS des 5 jours (13 / 28 mm hors saison de végétation, 36 / 53 mm en saison) multipliés par 2,
+ * l'indice cumulant l'équivalent d'environ 10 jours de pluie (somme des poids 0,9^n sur 30 jours).
+ */
 export function amcFromAntecedent(mm, month) {
   const growing = month >= 4 && month <= 10;
-  const [lo, hi] = growing ? [36, 53] : [13, 28];
+  const [lo, hi] = growing ? [72, 106] : [26, 56];
   return mm < lo ? 1 : mm > hi ? 3 : 2;
 }
 

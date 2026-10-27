@@ -297,6 +297,13 @@ async function calibrate() {
   };
   try {
     for (const f of [0.25, 0.4, 0.6, 1, 1.6]) if (job.cancel || !(await tryF(f))) break;
+    // Meilleur réglage au bord de la plage essayée : on continue dans ce sens (3 essais au plus)
+    for (let n = 0; n < 3 && !job.cancel && tried.length >= 3; n++) {
+      const b = tried.reduce((a, x) => (x.s < a.s ? x : a));
+      const fs = tried.map((x) => x.f);
+      const next = b.f === Math.max(...fs) ? b.f * 1.6 : b.f === Math.min(...fs) ? b.f / 1.6 : null;
+      if (!next || next > 8 || next < 0.05 || !(await tryF(Math.round(next * 100) / 100))) break;
+    }
     // Affinage autour du meilleur
     if (!job.cancel && tried.length >= 3) {
       const b = tried.reduce((a, x) => (x.s < a.s ? x : a));

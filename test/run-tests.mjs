@@ -7,7 +7,7 @@ import { CpuSolver } from '../src/sim/cpuSolver.js';
 import { buildGauges, prepareTerrain } from '../src/sim/model.js';
 import { rasterizeLine } from '../src/data/rivers.js';
 import { floodQuantiles } from '../src/hydrology/flood.js';
-import { arealHourly, rainWindow, amcFromAntecedent, antecedentIndex, episodeScores, parisDayStart } from '../src/hydrology/episode.js';
+import { yearsOf, arealHourly, rainWindow, amcFromAntecedent, antecedentIndex, episodeScores, parisDayStart } from '../src/hydrology/episode.js';
 import { parseFlowCsv, topFloods } from '../src/data/hydro.js';
 import { runMetrics, analyseComparison, diffCodes, durationAbove } from '../src/sim/compare.js';
 import { drainageLabels, basinMask, accumulation, upstreamMask, flowDirections } from '../src/hydrology/terrain.js';
@@ -320,9 +320,14 @@ await test('épisode réel : pluie moyenne, fenêtre, humidité du sol, écarts 
   hist[30 * 24 - 1] = 10;
   hist[20 * 24 - 1] = 10;
   assert.ok(Math.abs(antecedentIndex(hist, 31 * 24) - (10 * 0.9 + 10 * 0.9 ** 11)) < 1e-6);
-  assert.equal(amcFromAntecedent(10, 1), 1);
-  assert.equal(amcFromAntecedent(60, 7), 3);
-  assert.equal(amcFromAntecedent(40, 7), 2);
+  assert.equal(amcFromAntecedent(20, 1), 1);
+  assert.equal(amcFromAntecedent(45, 11), 2);
+  assert.equal(amcFromAntecedent(60, 12), 3);
+  assert.equal(amcFromAntecedent(110, 7), 3);
+  // Noms des fichiers horaires Météo-France : décennie, années récentes, dernières années
+  assert.deepEqual(yearsOf('x/H_68_2010-2019.csv.gz'), [2010, 2019]);
+  assert.deepEqual(yearsOf('x/H_68_previous-2020-2024.csv.gz'), [2020, 2024]);
+  assert.deepEqual(yearsOf('x/H_68_latest-2025-2026.csv.gz'), [2025, 2026]);
   // Heure d'été : le jour commence à 22 h TU la veille
   assert.equal(new Date(parisDayStart('2019-07-01')).toISOString(), '2019-06-30T22:00:00.000Z');
   assert.equal(new Date(parisDayStart('2019-12-01')).toISOString(), '2019-11-30T23:00:00.000Z');

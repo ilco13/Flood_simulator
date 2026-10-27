@@ -4,6 +4,7 @@
 // des stations proches et de la période sont gardées. Heures en temps universel.
 
 import { cacheGet, cachePut } from './cache.js';
+import { yearsOf } from '../hydrology/episode.js';
 
 const INDEX_URL = 'https://www.data.gouv.fr/api/1/datasets/donnees-climatologiques-de-base-horaires/';
 const BASE = 'https://object.files.data.gouv.fr/meteofrance/data/synchro_ftp/BASE/HOR/';
@@ -16,11 +17,6 @@ function distKm(lat1, lon1, lat2, lon2) {
   return 12742 * Math.asin(Math.sqrt(a));
 }
 
-/** Années couvertes par un fichier : H_13_1990-1999, H_13_previous-2020-2024, H_13_latest-2025-2026. */
-function yearsOf(url) {
-  const m = /_(\d{4})-(\d{4})\.csv\.gz$/.exec(url);
-  return m ? [Number(m[1]), Number(m[2])] : null;
-}
 
 async function departmentFiles(dep) {
   let index = await cacheGet('mf-hor-index');
