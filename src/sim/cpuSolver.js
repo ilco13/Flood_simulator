@@ -4,7 +4,7 @@
 //  qx[j*(nx+1)+i] : face entre la maille (i-1, j) et (i, j). Positif vers l'est.
 //  qy[j*nx+i]     : face entre la maille (i, j-1) et (i, j). Positif vers le sud (j croissant).
 
-import { G, H_MIN, FROUDE_MAX, V_MAX, BOUNDARY_SLOPE, THETA } from './scheme.js';
+import { G, H_MIN, FROUDE_MAX, V_MAX, BOUNDARY_SLOPE, THETA, CFL } from './scheme.js';
 import { IA_RATIO, HORTON_P } from '../hydrology/scs.js';
 import { zoneCum } from '../hydrology/rainField.js';
 import { applyCulverts } from './culvert.js';
@@ -84,6 +84,9 @@ export function sourceDepthRates(sources, flat, t, dx, out) {
   for (let m = 0; m < flat.cells.length; m++) out[m] = per[flat.owner[m]];
   return out;
 }
+
+export let LTS_CFL = CFL;
+export const setLtsCfl = (v) => (LTS_CFL = v);
 
 export class CpuSolver {
   /**
@@ -274,6 +277,383 @@ export class CpuSolver {
     }
     if (this.links) applyCulverts(h, z, this.links, dt, dx, this.linkQmax);
     return hm;
+  }
+
+  /**
+   * Pluie de chaque maille sur [ta, tb] : prépare la fonction netRain(k, i, j) (m de pluie nette).
+   * rainFn(ta, tb) → [pluie brute (m), cumul au milieu (mm)] pour la pluie uniforme.
+   */
+  #rainOver(ta, tb, rainFn) {
+    const dt = tb - ta;
+    const { S, fc, rz } = this;
+    let [rainDepth, cumP] = rainFn(ta, tb);
+    let capDt = fc && rainDepth > 0 ? dt * (1 + (this.m0 - 1) * Math.exp(-cumP / HORTON_P)) : 0;
+    let zD = null;
+    let zC = null;
+    let zCap = null;
+    if (rz) {
+      zD = new Float64Array(rz.nz);
+      zC = new Float64Array(rz.nz);
+      zCap = new Float64Array(rz.nz);
+      for (let z = 0; z < rz.nz; z++) {
+        const a = zoneCum(rz, z, ta);
+        const b = zoneCum(rz, z, tb);
+        zD[z] = (b - a) / 1000;
+        zC[z] = 0.5 * (a + b);
+        zCap[z] = fc ? dt * (1 + (this.m0 - 1) * Math.exp(-zC[z] / HORTON_P)) : 0;
+      }
+    }
+    const zoneCol = this.zoneCol;
+    return (k, i, j) => {
+      const sk = S[k];
+      if (sk < 0) return 0;
+      let rd = rainDepth;
+      let cp = cumP;
+      let cap = capDt;
+      if (rz) {
+        const zz = Math.floor(j / rz.bj) * rz.nzx + zoneCol[i];
+        rd = zD[zz];
+        cp = zC[zz];
+        cap = zCap[zz];
+      }
+      if (rd <= 0) return 0;
+      const x = cp - IA_RATIO * sk;
+      let r = x > 0 ? rd * (1 - (sk * sk) / ((x + sk) * (x + sk))) : 0;
+      if (fc) r = Math.max(r, rd - fc[k] * cap);
+      return r > 0 ? r : 0;
+    };
+  }
+
+  /**
+   * Pas de temps par zone : R sous-pas de dtF dans les mailles profondes (et 2 mailles autour),
+   * un seul pas de R·dtF ailleurs. Les échanges à travers les faces des mailles profondes sont
+   * cumulés pour leurs voisines : la masse reste exactement conservée.
+   * @param fine  Uint8Array : 1 pour les mailles à petit pas (voir fineMask)
+   * @param rainFn (ta, tb) → [pluie brute (m), cumul au milieu (mm)]
+   */
+  stepLts(dtF, R, t0, rainFn, fine) {
+    const { nx, ny, dx, z, h, n } = this;
+    const N = nx * ny;
+    const dtC = R * dtF;
+    const qx = this.qx;
+    const qy = this.qy;
+    // Faces « fines » : au moins une maille voisine fine (bords compris)
+    const fx = [];
+    const fy = [];
+    for (let j = 0; j < ny; j++)
+      for (let i = 0; i <= nx; i++) if ((i > 0 && fine[j * nx + i - 1]) || (i < nx && fine[j * nx + i])) fx.push(j * (nx + 1) + i);
+    for (let j = 0; j <= ny; j++)
+      for (let i = 0; i < nx; i++) if ((j > 0 && fine[(j - 1) * nx + i]) || (j < ny && fine[j * nx + i])) fy.push(j * nx + i);
+    const fineCells = [];
+    for (let k = 0; k < N; k++) if (fine[k]) fineCells.push(k);
+    // Mailles touchées par une face fine (fines et voisines grossières)
+    const touched = new Uint8Array(N);
+    for (const f of fx) {
+      const j = Math.floor(f / (nx + 1));
+      const i = f - j * (nx + 1);
+      if (i > 0) touched[j * nx + i - 1] = 1;
+      if (i < nx) touched[j * nx + i] = 1;
+    }
+    for (const f of fy) {
+      const j = Math.floor(f / nx);
+      const i = f - j * nx;
+      if (j > 0) touched[(j - 1) * nx + i] = 1;
+      if (j < ny) touched[j * nx + i] = 1;
+    }
+    const tcells = [];
+    for (let k = 0; k < N; k++) if (touched[k]) tcells.push(k);
+    const tx = new Float32Array(fx.length);
+    const ty = new Float32Array(fy.length);
+    const ratio = this.ratio;
+    let hm = 0;
+    const isSrcFine = this.flat ? Array.from(this.flat.cells, (k) => !!fine[k]) : null;
+    // Débit sortant d'une maille par ses faces fines seulement (maille grossière : voisines fines)
+    const outFine = (k, i, j) => {
+      const ex = j * (nx + 1) + i;
+      const ey = j * nx + i;
+      let o = 0;
+      const fk = fine[k];
+      if (fk || (i > 0 && fine[k - 1])) o += Math.max(0, -qx[ex]);
+      if (fk || (i < nx - 1 && fine[k + 1]) || (fk && i === nx - 1)) o += Math.max(0, qx[ex + 1]);
+      if (fk || (j > 0 && fine[k - nx])) o += Math.max(0, -qy[ey]);
+      if (fk || (j < ny - 1 && fine[k + nx]) || (fk && j === ny - 1)) o += Math.max(0, qy[ey + nx]);
+      return o;
+    };
+
+    for (let s = 0; s < R; s++) {
+      const t = t0 + (s + 1) * dtF;
+      // 1) flux des faces fines (à partir de l'état précédent : comme le double tampon)
+      for (let m = 0; m < fx.length; m++) {
+        const f = fx[m];
+        const j = Math.floor(f / (nx + 1));
+        const i = f - j * (nx + 1);
+        const row = j * nx;
+        if (i === 0) tx[m] = -boundaryFlux(h[row], n[row]);
+        else if (i === nx) tx[m] = boundaryFlux(h[row + nx - 1], n[row + nx - 1]);
+        else tx[m] = faceFlux(qx[f], qx[f - 1], qx[f + 1], z[row + i - 1], h[row + i - 1], z[row + i], h[row + i], n[row + i - 1], n[row + i], dx, dtF);
+      }
+      for (let m = 0; m < fy.length; m++) {
+        const f = fy[m];
+        const j = Math.floor(f / nx);
+        const i = f - j * nx;
+        if (j === 0) ty[m] = -boundaryFlux(h[i], n[i]);
+        else if (j === ny) ty[m] = boundaryFlux(h[(ny - 1) * nx + i], n[(ny - 1) * nx + i]);
+        else {
+          const kU = (j - 1) * nx + i;
+          const kD = j * nx + i;
+          ty[m] = faceFlux(qy[f], f >= nx ? qy[f - nx] : 0, qy[f + nx] ?? 0, z[kU], h[kU], z[kD], h[kD], n[kU], n[kD], dx, dtF);
+        }
+      }
+      for (let m = 0; m < fx.length; m++) qx[fx[m]] = tx[m];
+      for (let m = 0; m < fy.length; m++) qy[fy[m]] = ty[m];
+      // 2) positivité : sorties par les faces fines limitées à l'eau disponible
+      for (const k of tcells) {
+        const i = k % nx;
+        const j = (k - i) / nx;
+        const vol = outFine(k, i, j) * dtF;
+        const avail = h[k] * dx;
+        ratio[k] = vol > avail ? avail / vol : 1;
+      }
+      for (const f of fx) {
+        const j = Math.floor(f / (nx + 1));
+        const i = f - j * (nx + 1);
+        const q = qx[f];
+        if (q > 0 && i > 0) qx[f] = q * ratio[j * nx + i - 1];
+        else if (q < 0 && i < nx) qx[f] = q * ratio[j * nx + i];
+      }
+      for (const f of fy) {
+        const j = Math.floor(f / nx);
+        const i = f - j * nx;
+        const q = qy[f];
+        if (q > 0 && j > 0) qy[f] = q * ratio[(j - 1) * nx + i];
+        else if (q < 0 && j < ny) qy[f] = q * ratio[j * nx + i];
+      }
+      // sorties par les bords (faces fines)
+      let out = 0;
+      for (const f of fx) {
+        const i = f % (nx + 1);
+        if (i === 0) out -= qx[f];
+        else if (i === nx) out += qx[f];
+      }
+      for (const f of fy) {
+        if (f < nx) out -= qy[f];
+        else if (f >= ny * nx) out += qy[f];
+      }
+      this.outflow += out * dx * dtF;
+      // 3) continuité : chaque face fine échange l'eau entre ses deux mailles (les voisines
+      //    grossières aussi : leur niveau suit) ; puis pluie des mailles fines
+      const c = dtF / dx;
+      for (let m = 0; m < fx.length; m++) {
+        const f = fx[m];
+        const j = Math.floor(f / (nx + 1));
+        const i = f - j * (nx + 1);
+        const v = c * qx[f];
+        if (i > 0) h[j * nx + i - 1] -= v;
+        if (i < nx) h[j * nx + i] += v;
+      }
+      for (let m = 0; m < fy.length; m++) {
+        const f = fy[m];
+        const j = Math.floor(f / nx);
+        const i = f - j * nx;
+        const v = c * qy[f];
+        if (j > 0) h[(j - 1) * nx + i] -= v;
+        if (j < ny) h[j * nx + i] += v;
+      }
+      for (const k of tcells) if (h[k] < 0) h[k] = 0;
+      const netRain = this.#rainOver(t - dtF, t, rainFn);
+      let rain = 0;
+      for (const k of fineCells) {
+        const i = k % nx;
+        const j = (k - i) / nx;
+        const ex = j * (nx + 1) + i;
+        const ey = j * nx + i;
+        let hn = h[k];
+        const r = netRain(k, i, j);
+        hn += r;
+        rain += r;
+        if (hn < 0) hn = 0;
+        h[k] = hn;
+        this.#trackMax(k, hn, t, ex, ey);
+      }
+      this.rainVolume += rain * dx * dx;
+      if (this.flat) this.#addSources(t, dtF, isSrcFine, true);
+      if (this.links) applyCulverts(h, z, this.links, dtF, dx, this.linkQmax);
+    }
+
+    // 4) mailles grossières : un pas de R·dtF sur les autres faces
+    const t1 = t0 + dtC;
+    const qx2 = this.qx2;
+    const qy2 = this.qy2;
+    qx2.set(qx);
+    qy2.set(qy);
+    for (let j = 0; j < ny; j++) {
+      const row = j * nx;
+      const frow = j * (nx + 1);
+      for (let i = 0; i <= nx; i++) {
+        if ((i > 0 && fine[row + i - 1]) || (i < nx && fine[row + i])) continue;
+        const f = frow + i;
+        if (i === 0) qx2[f] = -boundaryFlux(h[row], n[row]);
+        else if (i === nx) qx2[f] = boundaryFlux(h[row + nx - 1], n[row + nx - 1]);
+        else qx2[f] = faceFlux(qx[f], qx[f - 1], qx[f + 1], z[row + i - 1], h[row + i - 1], z[row + i], h[row + i], n[row + i - 1], n[row + i], dx, dtC);
+      }
+    }
+    for (let j = 0; j <= ny; j++)
+      for (let i = 0; i < nx; i++) {
+        if ((j > 0 && fine[(j - 1) * nx + i]) || (j < ny && fine[j * nx + i])) continue;
+        const f = j * nx + i;
+        if (j === 0) qy2[f] = -boundaryFlux(h[i], n[i]);
+        else if (j === ny) qy2[f] = boundaryFlux(h[(ny - 1) * nx + i], n[(ny - 1) * nx + i]);
+        else {
+          const kU = (j - 1) * nx + i;
+          const kD = j * nx + i;
+          qy2[f] = faceFlux(qy[f], f >= nx ? qy[f - nx] : 0, qy[f + nx] ?? 0, z[kU], h[kU], z[kD], h[kD], n[kU], n[kD], dx, dtC);
+        }
+      }
+    this.qx = qx2;
+    this.qy = qy2;
+    this.qx2 = qx;
+    this.qy2 = qy;
+    const QX = qx2;
+    const QY = qy2;
+    // positivité des mailles grossières (faces grossières seulement ; l'eau déjà échangée compte)
+    for (let j = 0; j < ny; j++)
+      for (let i = 0; i < nx; i++) {
+        const k = j * nx + i;
+        if (fine[k]) {
+          ratio[k] = 1;
+          continue;
+        }
+        const ex = j * (nx + 1) + i;
+        const ey = j * nx + i;
+        let o = 0;
+        if (!(i > 0 && fine[k - 1])) o += Math.max(0, -QX[ex]);
+        if (!(i < nx - 1 && fine[k + 1])) o += Math.max(0, QX[ex + 1]);
+        if (!(j > 0 && fine[k - nx])) o += Math.max(0, -QY[ey]);
+        if (!(j < ny - 1 && fine[k + nx])) o += Math.max(0, QY[ey + nx]);
+        const vol = o * dtC;
+        const avail = h[k] * dx;
+        ratio[k] = vol > avail ? avail / vol : 1;
+      }
+    for (let j = 0; j < ny; j++)
+      for (let i = 0; i <= nx; i++) {
+        if ((i > 0 && fine[j * nx + i - 1]) || (i < nx && fine[j * nx + i])) continue;
+        const f = j * (nx + 1) + i;
+        const q = QX[f];
+        if (q > 0 && i > 0) QX[f] = q * ratio[j * nx + i - 1];
+        else if (q < 0 && i < nx) QX[f] = q * ratio[j * nx + i];
+      }
+    for (let j = 0; j <= ny; j++)
+      for (let i = 0; i < nx; i++) {
+        if ((j > 0 && fine[(j - 1) * nx + i]) || (j < ny && fine[j * nx + i])) continue;
+        const f = j * nx + i;
+        const q = QY[f];
+        if (q > 0 && j > 0) QY[f] = q * ratio[(j - 1) * nx + i];
+        else if (q < 0 && j < ny) QY[f] = q * ratio[j * nx + i];
+      }
+    let out = 0;
+    for (let j = 0; j < ny; j++) {
+      if (!fine[j * nx]) out -= QX[j * (nx + 1)];
+      if (!fine[j * nx + nx - 1]) out += QX[j * (nx + 1) + nx];
+    }
+    for (let i = 0; i < nx; i++) {
+      if (!fine[i]) out -= QY[i];
+      if (!fine[(ny - 1) * nx + i]) out += QY[ny * nx + i];
+    }
+    this.outflow += out * dx * dtC;
+    const c = dtC / dx;
+    const netRain = this.#rainOver(t0, t1, rainFn);
+    let rain = 0;
+    for (let j = 0; j < ny; j++)
+      for (let i = 0; i < nx; i++) {
+        const k = j * nx + i;
+        if (fine[k]) {
+          if (h[k] > hm) hm = h[k];
+          continue;
+        }
+        const ex = j * (nx + 1) + i;
+        const ey = j * nx + i;
+        let d = 0;
+        if (!(i > 0 && fine[k - 1])) d += QX[ex];
+        if (!(i < nx - 1 && fine[k + 1])) d -= QX[ex + 1];
+        if (!(j > 0 && fine[k - nx])) d += QY[ey];
+        if (!(j < ny - 1 && fine[k + nx])) d -= QY[ey + nx];
+        let hn = h[k] + c * d;
+        const r = netRain(k, i, j);
+        hn += r;
+        rain += r;
+        if (hn < 0) hn = 0;
+        h[k] = hn;
+        if (hn > hm) hm = hn;
+        this.#trackMax(k, hn, t1, ex, ey);
+      }
+    this.rainVolume += rain * dx * dx;
+    if (this.flat) {
+      this.#addSources(t1, dtC, isSrcFine, false);
+      for (const k of this.flat.cells) if (h[k] > hm) hm = h[k];
+    }
+    return hm;
+  }
+
+  #trackMax(k, hn, t, ex, ey) {
+    if (hn > this.hmax[k]) {
+      this.hmax[k] = hn;
+      this.tmax[k] = t;
+    }
+    if (hn > 0.05) {
+      const ux = 0.5 * (this.qx[ex] + this.qx[ex + 1]);
+      const uy = 0.5 * (this.qy[ey] + this.qy[ey + this.nx]);
+      const v = Math.sqrt(ux * ux + uy * uy) / hn;
+      if (v > this.vmax[k]) this.vmax[k] = v;
+    }
+  }
+
+  /** Apports sur les mailles fines (fineOnes) ou grossières, pendant dt finissant à t. */
+  #addSources(t, dt, isFine, fineOnes) {
+    const { cells } = this.flat;
+    const r = sourceDepthRates(this.sources, this.flat, t - dt / 2, this.dx, this.rates);
+    let vol = 0;
+    for (let m = 0; m < cells.length; m++) {
+      if (isFine[m] !== fineOnes) continue;
+      this.h[cells[m]] += r[m] * dt;
+      vol += r[m] * dt;
+    }
+    this.rainVolume += vol * this.dx * this.dx;
+  }
+
+  /**
+   * Mailles à petit pas pour un grand pas dtC : celles dont la profondeur (avec une marge de
+   * croissance) l'exigent, élargies de 2 mailles. Renvoie le nombre de mailles fines.
+   */
+  fineMask(dtC, out, cfl = LTS_CFL) {
+    const { nx, ny, dx, h } = this;
+    // pas stable avec une marge (CFL réduit) : h' ≤ (cfl·dx/dtC)²/g ; h' = 1,3·h + 0,05
+    const hLim = (((cfl * dx) / dtC) ** 2 / G - 0.05) / 1.3;
+    const a = this.fineTmp && this.fineTmp.length === nx * ny ? this.fineTmp : (this.fineTmp = new Uint8Array(nx * ny));
+    for (let k = 0; k < nx * ny; k++) a[k] = h[k] > hLim ? 1 : 0;
+    // élargissement de 2 mailles (carré 5×5), en deux passes séparables
+    const b = out;
+    for (let j = 0; j < ny; j++)
+      for (let i = 0; i < nx; i++) {
+        let v = 0;
+        for (let d = -2; d <= 2 && !v; d++) {
+          const ii = i + d;
+          if (ii >= 0 && ii < nx && a[j * nx + ii]) v = 1;
+        }
+        b[j * nx + i] = v;
+      }
+    let count = 0;
+    for (let j = 0; j < ny; j++)
+      for (let i = 0; i < nx; i++) {
+        let v = 0;
+        for (let d = -2; d <= 2 && !v; d++) {
+          const jj = j + d;
+          if (jj >= 0 && jj < ny && b[jj * nx + i]) v = 1;
+        }
+        a[j * nx + i] = v;
+        count += v;
+      }
+    out.set(a);
+    return count;
   }
 
   /** Débits (m³/s) aux sections de contrôle. */

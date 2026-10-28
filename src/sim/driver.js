@@ -1,22 +1,47 @@
 // Boucle de simulation commune aux moteurs CPU et GPU.
 
 import { CpuSolver } from './cpuSolver.js';
-import { stableDt } from './scheme.js';
+import { DT_MAX, stableDt } from './scheme.js';
 import { fluxFields } from './flux.js';
 
 /** Adaptateur asynchrone autour du solveur CPU. */
+export const LTS_RATIO = 4; // sous-pas des mailles profondes dans un grand pas
+export const LTS_MAX_FINE = 0.5; // au-delà de cette part de mailles fines, pas unique
+
 export class CpuBackend {
-  constructor(model, gauges) {
+  /** opts.lts : pas de temps par zone (voir CpuSolver.stepLts). */
+  constructor(model, gauges, opts = {}) {
     this.solver = new CpuSolver(model);
     this.gauges = gauges;
     this.t = 0;
     this.hm = 0;
     this.steps = 0;
+    this.lts = opts.lts ?? true;
+    this.fine = this.lts ? new Uint8Array(model.nx * model.ny) : null;
+    this.coarseSteps = 0;
   }
   async advance(tEnd, hyeto) {
     const s = this.solver;
+    const rainFn = (ta, tb) => {
+      const P0 = hyeto.cumulative(ta);
+      const P1 = hyeto.cumulative(tb);
+      return [(P1 - P0) / 1000, 0.5 * (P0 + P1)];
+    };
     while (this.t < tEnd - 1e-6) {
-      const dt = Math.min(stableDt(s.dx, this.hm * 1.05 + 0.02), tEnd - this.t);
+      const dtF = stableDt(s.dx, this.hm * 1.05 + 0.02);
+      // Pas par zone : R sous-pas dans les mailles profondes, un pas R fois plus grand ailleurs
+      if (this.lts && LTS_RATIO * dtF <= DT_MAX && this.t + LTS_RATIO * dtF <= tEnd + 1e-6) {
+        const nf = s.fineMask(LTS_RATIO * dtF, this.fine);
+        if (nf < LTS_MAX_FINE * s.nx * s.ny) {
+          this.hm = s.stepLts(dtF, LTS_RATIO, this.t, rainFn, this.fine);
+          this.t += LTS_RATIO * dtF;
+          this.steps += LTS_RATIO;
+          this.coarseSteps++;
+          if (!Number.isFinite(this.hm)) throw new Error('Instabilité numérique détectée');
+          continue;
+        }
+      }
+      const dt = Math.min(dtF, tEnd - this.t);
       const P0 = hyeto.cumulative(this.t);
       const P1 = hyeto.cumulative(this.t + dt);
       this.t += dt;
