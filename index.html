@@ -362,6 +362,9 @@
               <summary>Bilan du calcul</summary>
               <p id="summary" class="hint"></p>
             </details>
+            <div class="btn-row">
+              <button id="report" class="ghost" type="button">Rapport PDF</button>
+            </div>
           </div>
         </div>
         <div id="compare-dock" hidden>
@@ -382,6 +385,9 @@
             <div class="cmp-table-wrap"><table id="cmp-table" class="cmp-table"></table></div>
             <h3>Analyse</h3>
             <div id="cmp-analysis" class="cmp-analysis"></div>
+            <div class="btn-row">
+              <button id="cmp-report" class="ghost" type="button">Rapport PDF de la comparaison</button>
+            </div>
             <h3>Sur la carte</h3>
             <div id="cmp-open" class="btn-row wrap"></div>
             <div class="cmp-diff-row">
@@ -426,5 +432,6 @@
       </main>
     </div>
     <script type="module" src="./src/main.js"></script>
+      <div id="report-print" class="report-print"></div>
   </body>
 </html>

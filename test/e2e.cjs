@@ -165,6 +165,20 @@ async function runSite(browser, key) {
       stor = await page.evaluate(() => document.querySelector('#storage-info')?.textContent || '');
     }
     check(/Place utilisée : .+ pour [1-9]/.test(stor), `stockage : ${stor.slice(0, 120)}`);
+    // Rapport PDF : page imprimable avec carte, courbes, résultats, hypothèses
+    await page.evaluate(() => (window.print = () => (window.__printed = true)));
+    await page.click('#report');
+    for (let i = 0; i < 20 && !(await page.evaluate(() => window.__printed)); i++) await page.waitForTimeout(500);
+    const rep = await page.evaluate(() => {
+      const el = document.querySelector('#report-print');
+      return { map: /^data:image/.test(el.querySelector('.rp-map')?.src || ''), charts: el.querySelectorAll('.rp-chart').length, hyp: /Hypothèses/.test(el.textContent), lim: /Limites/.test(el.textContent), printed: !!window.__printed };
+    });
+    check(rep.printed && rep.map && rep.charts >= 1 && rep.hyp && rep.lim, `rapport PDF : ${JSON.stringify(rep)}`);
+    if (outDir) {
+      await page.emulateMedia({ media: 'print' });
+      await page.pdf({ path: `${outDir}/${key}-rapport.pdf`, format: 'A4' }).catch(() => {});
+      await page.emulateMedia({ media: 'screen' });
+    }
     if (outDir) await page.screenshot({ path: `${outDir}/${key}.png` });
   } catch (e) {
     check(false, `erreur : ${String(e.message || e).slice(0, 200)}`);

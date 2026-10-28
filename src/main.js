@@ -11,6 +11,7 @@ import { updateRainInfo, updateResInfo } from './app/params.js';
 import { addArrowLayer, probeAt, setupMapTip } from './app/results.js';
 import { structureClick } from './app/structures.js';
 import { loadShared, shareScenario } from './app/share.js';
+import { makeReport } from './app/report.js';
 import { resolveMapReady } from './app/saved.js';
 import { restoreCatchment, studyPlace } from './app/study.js';
 import { setupUi } from './app/ui.js';
@@ -42,6 +43,8 @@ async function main() {
   restoreCatchment();
   loadShared(); // scénario reçu par un lien
   $('share').onclick = shareScenario;
+  $('report').onclick = () => makeReport();
+  $('cmp-report').onclick = () => makeReport({ comparison: true });
   // Pendant qu'on déplace / zoome la carte, le calcul GPU cède la main entre de petits lots.
   let idleTimer = null;
   state.map.on('movestart', () => {

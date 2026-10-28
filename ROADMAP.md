@@ -78,14 +78,14 @@ But : moins de réglages « au jugé ».
   - Station Hub'Eau de la rivière (même nom, bassin comparable, ≥ 15 années complètes), maxima annuels de septembre à août, loi de Gumbel, transposition à la confluence (Q ∝ S^0,8) ; formule en secours.
   - Arc sous la Torse (358 km²) : station de Meyreuil, 53 ans (1972–2026) → décennale 115, centennale 201 m³/s à la station, 234 m³/s à la confluence, au lieu de 430 m³/s par la formule.
 
-## Étape 5 — Partage et confort (≈ 2 séances)
+## Étape 5 — Partage et confort (≈ 2 séances) ✅
 
 But : rendre les résultats faciles à transmettre.
 
-- [ ] Rapport PDF d'une simulation ou d'une comparaison : carte, coupe, courbes, tableau, hypothèses et limites
-- [ ] Lien de partage d'un scénario (lieu et réglages), relançable par quelqu'un d'autre
-- [ ] Mode simple au premier lancement : lieu → pluie de référence → lancer
-- [ ] Gestion du stockage : place utilisée, nettoyage des anciennes simulations
+- [x] Rapport PDF d'une simulation ou d'une comparaison : carte, coupe, courbes, tableau, hypothèses et limites (page imprimable, « Enregistrer en PDF » du navigateur, aussi sur téléphone)
+- [x] Lien de partage d'un scénario (lieu et réglages), relançable par quelqu'un d'autre (tout est dans l'adresse, rien sur un serveur)
+- [x] Mode simple au premier lancement : lieu → pluie de référence → lancer
+- [x] Gestion du stockage : place utilisée, nettoyage des anciennes simulations (20 dernières gardées automatiquement)
 
 ## Points de vigilance
 

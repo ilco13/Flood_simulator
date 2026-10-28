@@ -1585,3 +1585,101 @@ body.simple .scroll > section:not(.adv):not(.about):not(#saved) > h2::before {
 .share-row {
   margin-top: 8px;
 }
+
+/* Rapport imprimable (« Enregistrer en PDF ») */
+.report-print {
+  display: none;
+}
+@media print {
+  @page {
+    size: A4;
+    margin: 14mm;
+  }
+  html,
+  body {
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+  body > *:not(.report-print) {
+    display: none !important;
+  }
+  .report-print {
+    display: block;
+    color: #111;
+    font: 10.5pt/1.45 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  }
+  .report-print h1 {
+    font-size: 17pt;
+    margin: 0 0 2mm;
+  }
+  .report-print header p {
+    color: #555;
+    margin: 0 0 4mm;
+  }
+  .report-print h2 {
+    font-size: 12.5pt;
+    margin: 6mm 0 2mm;
+    border-bottom: 1px solid #ccc;
+    break-after: avoid;
+  }
+  .report-print h3 {
+    font-size: 10.5pt;
+    margin: 3mm 0 1mm;
+  }
+  .report-print img {
+    display: block;
+    max-width: 100%;
+    break-inside: avoid;
+  }
+  .report-print .rp-map {
+    max-height: 150mm;
+    margin: 0 auto;
+    border: 1px solid #bbb;
+  }
+  .report-print .rp-chart {
+    max-height: 80mm;
+  }
+  .report-print table {
+    border-collapse: collapse;
+    width: 100%;
+    break-inside: avoid;
+  }
+  .report-print th,
+  .report-print td {
+    text-align: left;
+    vertical-align: top;
+    border-bottom: 1px solid #e3e3e3;
+    padding: 1.2mm 2mm;
+    font-size: 9.5pt;
+  }
+  .report-print .rp-params th {
+    width: 32%;
+    color: #333;
+  }
+  .report-print .rp-cap,
+  .report-print .rp-link {
+    color: #555;
+    font-size: 9pt;
+  }
+  .report-print .rp-legend,
+  .report-print .rp-maplegend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2mm 5mm;
+    font-size: 9pt;
+  }
+  .report-print .rp-legend i,
+  .report-print .rp-maplegend i {
+    display: inline-block;
+    width: 4mm;
+    height: 2.5mm;
+    margin-right: 1mm;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .report-print * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
