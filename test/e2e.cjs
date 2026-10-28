@@ -12,7 +12,7 @@ const SITES = {
   weiss: { name: 'Weiss à Orbey', lon: 7.161617, lat: 48.126926, area: 33.6, river: 'Weiss', res: '25' },
   roya: { name: 'Roya à Fontan', lon: 7.554355, lat: 44.002656, area: 299, river: 'Roya', res: '50' },
   emboite: { name: 'Torse à Aix, calcul en deux temps (bassin 25 m, zone fine 2 km à 10 m)', lon: 5.4672, lat: 43.518, area: 20.7, river: 'Torse', res: '25', nest: { r: '1000', res: '10' } },
-  torse: { name: 'Torse à Aix (Arc en aval)', lon: 5.4672, lat: 43.518, area: 20.7, river: 'Torse', res: '25', aval: { river: 'Arc', minAreaKm2: 250 } },
+  torse: { name: 'Torse à Aix (Arc en aval)', lon: 5.4672, lat: 43.518, area: 20.7, river: 'Torse', res: '25', aval: { river: 'Arc', minAreaKm2: 250, station: 'Y402201001' } },
 };
 
 const [url = 'http://localhost:4173/', which = Object.keys(SITES).join(','), outDir = ''] = process.argv.slice(2);
@@ -48,6 +48,10 @@ async function runSite(browser, key) {
       const r = main?.receiver;
       check(r && norm(r.name).includes(norm(site.aval.river)) && r.area >= site.aval.minAreaKm2, `rivière aval ${r ? `${r.name}, ${r.area.toFixed(0)} km²` : 'non trouvée'}`);
       await page.check('#aval-on');
+      // Crues mesurées à une station de la rivière (Hub'Eau), à la place de la formule
+      for (let i = 0; i < 60 && !(await page.evaluate(() => !!window.floodApp.study.avalStation)); i++) await page.waitForTimeout(1000);
+      const st = await page.evaluate(() => window.floodApp.study.avalStation?.station);
+      if (site.aval.station) check(st && st.code === site.aval.station && st.years >= 15, `station de la rivière aval : ${st ? `${st.name}, ${st.years} ans, centennale ${st.q100.toFixed(0)} m³/s` : 'non trouvée'}`);
     }
     // Simulation : 80 mm en 3 h, maille grossière, arrêt après le pic
     await page.fill('#rain-mm', '80');

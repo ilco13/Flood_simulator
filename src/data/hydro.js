@@ -3,6 +3,7 @@
 // 1970 selon les stations), débits d'un épisode ; lecture d'un export HydroPortail (CSV).
 
 import { cacheGet, cachePut } from './cache.js';
+import { MIN_STATION_YEARS, annualMaxima, gumbelQuantiles } from '../hydrology/flood.js';
 
 const API = 'https://hubeau.eaufrance.fr/api/v2/hydrometrie';
 
@@ -69,6 +70,34 @@ export async function dailyMax(code, since = '1990-01-01') {
   days.sort((a, b) => (a[0] < b[0] ? -1 : 1));
   await cachePut(key, { t: Date.now(), days });
   return days;
+}
+
+const normName = (t) =>
+  String(t || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/^(l'|la |le |les )/, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+
+/** Même cours d'eau (noms BD TOPO et Hub'Eau écrits différemment : « L'Arc », « Arc »). */
+export function sameRiver(a, b) {
+  const x = normName(a);
+  const y = normName(b);
+  return !!x && !!y && (x === y || x.endsWith(` ${y}`) || y.endsWith(` ${x}`));
+}
+
+/**
+ * Crues décennale et centennale d'une station d'après ses maxima annuels mesurés (Gumbel), ou
+ * null s'il y a moins de MIN_STATION_YEARS années complètes.
+ */
+export async function stationFloods(code) {
+  const ann = annualMaxima(await dailyMax(code, '1950-01-01'));
+  if (ann.length < MIN_STATION_YEARS) return null;
+  const g = gumbelQuantiles(ann.map((e) => e.q));
+  const top = ann.reduce((a, b) => (b.q > a.q ? b : a));
+  return { ...g, years: ann.length, first: ann[0].year, last: ann.at(-1).year + 1, maxQ: top.q, maxYear: top.year };
 }
 
 /** Plus fortes crues : maxima journaliers les plus élevés, à au moins `gapDays` jours d'écart. */

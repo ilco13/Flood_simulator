@@ -18,3 +18,39 @@ export function floodQuantiles(areaKm2, pj10 = 80, pj100 = 120, R = 1) {
   const q100 = q10 + (dP * areaKm2) / (3.6 * tc);
   return { q10, q100, tc };
 }
+
+/**
+ * Maxima annuels d'une chronique de maxima journaliers [[AAAA-MM-JJ, Q]] : années hydrologiques
+ * de septembre à août (les crues d'automne restent dans la même année) ; années incomplètes
+ * (moins de `minDays` jours mesurés) écartées.
+ */
+export function annualMaxima(days, minDays = 290) {
+  const by = new Map();
+  for (const [d, q] of days) {
+    if (!(q >= 0)) continue;
+    const y = Number(d.slice(0, 4)) - (Number(d.slice(5, 7)) < 9 ? 1 : 0);
+    const e = by.get(y) || { year: y, q: 0, n: 0 };
+    e.q = Math.max(e.q, q);
+    e.n++;
+    by.set(y, e);
+  }
+  return [...by.values()].filter((e) => e.n >= minDays).sort((a, b) => a.year - b.year);
+}
+
+/**
+ * Loi de Gumbel ajustée par les moments sur des maxima annuels : débits de période de retour
+ * 10 et 100 ans.
+ */
+export function gumbelQuantiles(values) {
+  const n = values.length;
+  const m = values.reduce((a, b) => a + b, 0) / n;
+  const sd = Math.sqrt(values.reduce((a, b) => a + (b - m) ** 2, 0) / (n - 1));
+  const a = (sd * Math.sqrt(6)) / Math.PI;
+  const u = m - 0.5772 * a;
+  const q = (T) => u - a * Math.log(-Math.log(1 - 1 / T));
+  return { q10: q(10), q100: q(100) };
+}
+
+export const MIN_STATION_YEARS = 15;
+/** Transposition d'un débit de crue d'une station à un autre point du cours d'eau : Q ∝ S^0,8. */
+export const transposeQ = (q, fromKm2, toKm2) => q * (toKm2 / fromKm2) ** 0.8;

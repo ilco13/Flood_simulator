@@ -1,5 +1,6 @@
 import { cellOf } from '../geo.js';
-import { floodQuantiles } from '../hydrology/flood.js';
+import { floodQuantiles, transposeQ } from '../hydrology/flood.js';
+import { sameRiver, stationFloods, stationsIn } from '../data/hydro.js';
 import { cmp } from './compareUi.js';
 import { $, fmtArea, fmtNum, state } from './core.js';
 import { describeRes } from './params.js';
@@ -17,12 +18,60 @@ export function mainReceiver() {
   return c.receiver ? c : null;
 }
 
-/** Débits de crue estimés de la rivière aval (m³/s). */
+/**
+ * Débits de crue de la rivière aval (m³/s) : d'après les crues mesurées à une station de la
+ * rivière quand il y en a une (ramenées à la confluence), sinon estimés par formule.
+ */
 export function avalEstimates() {
   const r = mainReceiver()?.receiver;
   if (!r) return null;
   const pj = state.study?.pj;
-  return { ...floodQuantiles(r.areaKm2, pj?.q10 ?? 80, pj?.q100 ?? 120), fromRain: !!pj };
+  const formula = { ...floodQuantiles(r.areaKm2, pj?.q10 ?? 80, pj?.q100 ?? 120), fromRain: !!pj };
+  const st = state.study?.avalStation;
+  if (st?.key === receiverKey(r) && st.station) {
+    const k = transposeQ(1, st.station.areaKm2, r.areaKm2);
+    return { q10: st.station.q10 * k, q100: st.station.q100 * k, station: st.station, formula };
+  }
+  return formula;
+}
+
+const receiverKey = (r) => `${r.name}|${Math.round(r.areaKm2)}`;
+/**
+ * Cherche une station Hub'Eau sur la rivière aval (même nom, bassin de taille comparable, au
+ * moins 15 ans de mesures) et enregistre ses crues décennale et centennale dans le lieu étudié.
+ */
+export async function findAvalStation() {
+  const s = state.study;
+  const r = mainReceiver()?.receiver;
+  if (!s || !r?.name || !r.confWgs) return;
+  const key = receiverKey(r);
+  if (s.avalStation?.key === key || state.avalStationBusy === key) return;
+  state.avalStationBusy = key;
+  try {
+    const [lon, lat] = r.confWgs;
+    const d = 0.35;
+    const list = (await stationsIn({ west: lon - d, east: lon + d, south: lat - d * 0.75, north: lat + d * 0.75 }))
+      .filter((st) => st.areaKm2 && sameRiver(st.river, r.name))
+      .map((st) => ({ ...st, ratio: Math.abs(Math.log(st.areaKm2 / r.areaKm2)) }))
+      .filter((st) => st.ratio < Math.log(4))
+      .sort((a, b) => a.ratio - b.ratio);
+    let station = null;
+    for (const st of list.slice(0, 4)) {
+      const f = await stationFloods(st.code).catch(() => null);
+      if (f) {
+        station = { code: st.code, name: st.name, areaKm2: st.areaKm2, ...f };
+        break;
+      }
+    }
+    if (state.study !== s) return;
+    s.avalStation = { key, station };
+    saveStudy();
+    renderAval();
+  } catch (e) {
+    console.warn('Stations Hub\'Eau indisponibles', e);
+  } finally {
+    if (state.avalStationBusy === key) state.avalStationBusy = null;
+  }
 }
 
 export function avalSettings() {
@@ -123,6 +172,7 @@ export function renderAval() {
   $('aval-on').checked = a.on;
   $('aval-opts').hidden = !a.on;
   $('aval-mode').value = a.mode;
+  findAvalStation();
   renderAvalInfo();
 }
 
@@ -133,12 +183,22 @@ export function renderAvalInfo() {
   if (!est) return;
   if (a.mode !== 'custom' || document.activeElement !== $('aval-q')) $('aval-q').value = a.mode === 'custom' ? (a.custom ?? '') : Math.round(a.mode === 'q10' ? est.q10 : est.q100);
   const r = mainReceiver().receiver;
+  const st = est.station;
+  const f = est.formula || est;
+  const src = st
+    ? `D'après les crues mesurées à la station <strong></strong> (${fmtArea(st.areaKm2)}, ${st.years} années de ${st.first} à ${st.last}, plus forte crue ${fmtNum(st.maxQ)} m³/s en ${st.maxYear}–${st.maxYear + 1} ; ` +
+      `loi de Gumbel : décennale ${fmtNum(st.q10)}, centennale ${fmtNum(st.q100)} m³/s), ramenées à la confluence : `
+    : `Estimation (ordre de grandeur, méthodes CRUPEDIX et gradex${f.fromRain ? ', pluies Météo-France du lieu' : ', pluies du lieu pas encore connues'}${
+        state.avalStationBusy ? ' ; recherche d\'une station de mesure…' : state.study?.avalStation ? ' ; pas de station de mesure utilisable sur cette rivière' : ''
+      }) : `;
   el.innerHTML = a.on
-    ? `Estimation (ordre de grandeur, méthodes CRUPEDIX et gradex${est.fromRain ? ', pluies Météo-France du lieu' : ', pluies du lieu pas encore connues'}) : ` +
-      `décennale ≈ <strong>${fmtNum(est.q10)} m³/s</strong>, centennale ≈ <strong>${fmtNum(est.q100)} m³/s</strong>. ` +
+    ? src +
+      `décennale ≈ <strong>${fmtNum(est.q10)} m³/s</strong>, centennale ≈ <strong>${fmtNum(est.q100)} m³/s</strong>` +
+      (st ? ` (formule : ${fmtNum(f.q10)} et ${fmtNum(f.q100)} m³/s). ` : '. ') +
       'Si vous connaissez le débit de crue de la rivière (HydroPortail, Vigicrues, PPRI), choisissez « Autre valeur ». ' +
       `La rivière est maintenue à ce débit pendant tout l'épisode (cas défavorable), injecté ${fmtNum(600)} m en amont de la confluence ; ` +
       `la zone de calcul s'étend jusqu'à la confluence (trait bleu sur la carte).` +
       (r.distM > 3000 ? ' <span class="warn">Confluence éloignée : le remous ne remonte en général pas si loin, sauf en plaine.</span>' : '')
     : 'Cochez pour simuler la rivière en crue au même moment : son niveau peut gêner l\'écoulement du cours d\'eau étudié et faire monter l\'eau en amont de la confluence (remous).';
+  if (a.on && st) el.querySelector('strong').textContent = st.name;
 }

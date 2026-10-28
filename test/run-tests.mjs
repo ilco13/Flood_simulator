@@ -7,10 +7,10 @@ import { CpuSolver } from '../src/sim/cpuSolver.js';
 import { culvertQ, defaultOpening } from '../src/sim/culvert.js';
 import { buildGauges, prepareTerrain } from '../src/sim/model.js';
 import { rasterizeLine } from '../src/data/rivers.js';
-import { floodQuantiles } from '../src/hydrology/flood.js';
+import { floodQuantiles, annualMaxima, gumbelQuantiles, transposeQ } from '../src/hydrology/flood.js';
 import { buildRainZones, zoneCum, zoneOf } from '../src/hydrology/rainField.js';
 import { amcFromWetness, amcIndex, yearsOf, arealHourly, rainWindow, amcFromAntecedent, antecedentIndex, episodeScores, parisDayStart } from '../src/hydrology/episode.js';
-import { parseFlowCsv, topFloods } from '../src/data/hydro.js';
+import { parseFlowCsv, topFloods, sameRiver } from '../src/data/hydro.js';
 import { runMetrics, analyseComparison, diffCodes, durationAbove } from '../src/sim/compare.js';
 import { drainageLabels, basinMask, accumulation, upstreamMask, flowDirections } from '../src/hydrology/terrain.js';
 
@@ -348,6 +348,28 @@ await test("apport d'une rivière : volume injecté conservé (bilan de masse)",
   assert.ok(Math.abs(m.rain - expected) / expected < 0.01, `apport ${m.rain.toFixed(0)} m³ au lieu de ${expected}`);
   assert.ok(Math.abs(m.rain - m.out - m.stored) / m.rain < 1e-3, 'bilan de masse');
   assert.ok(m.out > 0.5 * m.rain, "l'eau s'écoule vers l'aval");
+});
+
+await test('crues d\'une station : maxima annuels (septembre–août) et loi de Gumbel', () => {
+  // Années hydrologiques : une crue d'octobre 2019 compte pour 2019–2020, celle de juin 2020 aussi
+  const days = [];
+  const d0 = Date.parse('2018-09-01');
+  for (let n = 0; n < 3 * 365; n++) days.push([new Date(d0 + n * 864e5).toISOString().slice(0, 10), 1]);
+  const set = (d, q) => (days.find((x) => x[0] === d)[1] = q);
+  set('2019-10-20', 50);
+  set('2020-06-01', 80);
+  set('2019-08-15', 30);
+  const ann = annualMaxima(days);
+  assert.deepEqual(ann.map((e) => [e.year, e.q]), [[2018, 30], [2019, 80], [2020, 1]]);
+  assert.equal(annualMaxima(days.slice(0, 200)).length, 0, 'année incomplète écartée');
+  // Gumbel exact sur un échantillon de quantiles théoriques (u = 50, a = 20)
+  const vals = Array.from({ length: 2000 }, (_, i) => 50 - 20 * Math.log(-Math.log((i + 0.5) / 2000)));
+  const g = gumbelQuantiles(vals);
+  const t10 = 50 - 20 * Math.log(-Math.log(0.9));
+  const t100 = 50 - 20 * Math.log(-Math.log(0.99));
+  assert.ok(Math.abs(g.q10 - t10) < 0.03 * t10 && Math.abs(g.q100 - t100) < 0.03 * t100, JSON.stringify(g));
+  assert.ok(Math.abs(transposeQ(100, 300, 600) - 100 * 2 ** 0.8) < 1e-9);
+  assert.ok(sameRiver("L'Arc", 'Arc') && sameRiver('La Durance', 'Durance') && !sameRiver("L'Arc", 'La Cause'));
 });
 
 await test('débits de crue estimés (CRUPEDIX + gradex)', () => {

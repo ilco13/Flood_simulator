@@ -59,7 +59,7 @@ But : confronter le simulateur aux mesures et régler ses paramètres sur le ter
   - Avec l'humidité du sol mesurée (étape 4) : calé sur Arc 2019 (×1,5) → +10 % ; transposé à Arc 2008 → +26 % ✓ ; Ganière calée +2 % ✓. Weiss : hors de portée du modèle (pic retrouvé mais pas le volume).
   - Pistes : pluie variable dans l'espace (étape 4), débit de base.
 
-## Étape 4 — Données d'entrée plus réalistes (≈ 2–3 séances)
+## Étape 4 — Données d'entrée plus réalistes (≈ 2–3 séances) ✅
 
 But : moins de réglages « au jugé ».
 
@@ -74,7 +74,9 @@ But : moins de réglages « au jugé ».
   - Dimensions par défaut : ouvrage qui laisse passer la crue centennale estimée ; modifiables sur la carte ; option embâcles (un tiers, deux tiers, bouché).
   - Calcul identique dans les deux moteurs (débit maximal dans une buse : 5,22 m³/s processeur, 5,21 GPU).
   - Verdalaï × avenue de Villelongue (pluie de test, 21 m³/s au lieu) : repéré à 10 m comme à 5 m (remblai de 2,6 m à 10 m, 4,6 m à 5 m) ; l'ouvrage estimé passe 13 à 17 m³/s, la route est submergée de 10 à 23 cm. À corriger avec les vraies dimensions du pont.
-- [ ] Rivière aval : reprendre les débits de crue décennale / centennale des stations quand ils existent, à la place de la formule
+- [x] Rivière aval : reprendre les débits de crue décennale / centennale des stations quand ils existent, à la place de la formule
+  - Station Hub'Eau de la rivière (même nom, bassin comparable, ≥ 15 années complètes), maxima annuels de septembre à août, loi de Gumbel, transposition à la confluence (Q ∝ S^0,8) ; formule en secours.
+  - Arc sous la Torse (358 km²) : station de Meyreuil, 53 ans (1972–2026) → décennale 115, centennale 201 m³/s à la station, 234 m³/s à la confluence, au lieu de 430 m³/s par la formule.
 
 ## Étape 5 — Partage et confort (≈ 2 séances)
 
