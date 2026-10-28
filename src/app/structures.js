@@ -10,7 +10,7 @@ import { escHtml } from './compareUi.js';
 const KEY = 'flood-sim-structures';
 const EMPTY = { type: 'FeatureCollection', features: [] };
 
-function loadOverrides() {
+export function loadOverrides() {
   try {
     return JSON.parse(localStorage.getItem(KEY)) || [];
   } catch {
@@ -18,7 +18,7 @@ function loadOverrides() {
   }
 }
 
-function saveOverrides(list) {
+export function saveOverrides(list) {
   try {
     localStorage.setItem(KEY, JSON.stringify(list));
   } catch {

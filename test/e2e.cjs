@@ -12,7 +12,7 @@ const SITES = {
   weiss: { name: 'Weiss à Orbey', lon: 7.161617, lat: 48.126926, area: 33.6, river: 'Weiss', res: '25' },
   roya: { name: 'Roya à Fontan', lon: 7.554355, lat: 44.002656, area: 299, river: 'Roya', res: '50' },
   emboite: { name: 'Torse à Aix, calcul en deux temps (bassin 25 m, zone fine 2 km à 10 m)', lon: 5.4672, lat: 43.518, area: 20.7, river: 'Torse', res: '25', nest: { r: '1000', res: '10' } },
-  torse: { name: 'Torse à Aix (Arc en aval)', lon: 5.4672, lat: 43.518, area: 20.7, river: 'Torse', res: '25', aval: { river: 'Arc', minAreaKm2: 250, station: 'Y402201001' } },
+  torse: { name: 'Torse à Aix (Arc en aval)', lon: 5.4672, lat: 43.518, area: 20.7, river: 'Torse', res: '25', aval: { river: 'Arc', minAreaKm2: 250, station: 'Y402201001' }, share: true },
 };
 
 const [url = 'http://localhost:4173/', which = Object.keys(SITES).join(','), outDir = ''] = process.argv.slice(2);
@@ -64,6 +64,29 @@ async function runSite(browser, key) {
       await page.selectOption('#nest-res', site.nest.res);
     }
     await page.selectOption('#res', site.res);
+    if (site.share) {
+      // Lien de partage : rouvert dans une autre page, mêmes réglages et même lieu
+      await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(url).origin }).catch(() => {});
+      await page.click('#share');
+      await page.waitForTimeout(500);
+      const link = await page.evaluate(async () => document.querySelector('#share-url')?.value || (await navigator.clipboard.readText().catch(() => '')));
+      const want = await page.evaluate(() => ({ cands: window.floodApp.study.cands.filter((c) => c.checked).map((c) => c.name).sort(), aval: window.floodApp.study.aval?.on }));
+      const p2 = await browser.newPage({ viewport: { width: 1000, height: 800 } });
+      p2.on('pageerror', (e) => errors.push(e.message.slice(0, 200)));
+      await p2.goto(link);
+      let got = null;
+      for (let i = 0; i < 90 && !got; i++) {
+        await p2.waitForTimeout(2000);
+        got = await p2.evaluate(() => {
+          const a = window.floodApp;
+          if (!a?.study || a.catchWorker || a.pendingShare) return null;
+          return { cands: a.study.cands.filter((c) => c.checked).map((c) => c.name).sort(), aval: a.study.aval?.on, mm: document.querySelector('#rain-mm').value, h: document.querySelector('#rain-h').value, res: document.querySelector('#res').value };
+        });
+      }
+      const same = got && JSON.stringify(got.cands) === JSON.stringify(want.cands) && !!got.aval === !!want.aval && got.mm === '80' && got.h === '3' && got.res === site.res;
+      check(same, `lien de partage (${link.length} caractères) rouvert : ${got ? JSON.stringify(got) : 'lieu non chargé'}`);
+      await p2.close();
+    }
     await page.dispatchEvent('#res', 'input');
     await page.click('#run');
     for (let i = 0; i < 900; i++) {

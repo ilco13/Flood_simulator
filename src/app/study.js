@@ -8,6 +8,7 @@ import { chooseEngine, describeRes, estimateSeconds, params } from './params.js'
 import { fetchRainRef, renderRainRef } from './rainRef.js';
 import { workerFailure } from './run.js';
 import { fetchSoil, renderSoilInfo } from './soil.js';
+import { applyPendingShare } from './share.js';
 
 /* ---------- Lieu étudié : bassins versants qui peuvent l'atteindre ---------- */
 
@@ -196,6 +197,7 @@ export function studyPlace(lng, lat) {
       fetchCurrentWetness();
       fetchRainRef();
       applyCalibNear();
+      applyPendingShare();
       if (window.matchMedia('(max-width: 760px)').matches) $('panel').classList.remove('collapsed');
     } else if (m.type === 'error') {
       end();
