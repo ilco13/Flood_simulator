@@ -37,6 +37,7 @@ But : mailles de 1–2 m autour du lieu en quelques minutes.
 - [x] Calcul emboîté : tout le bassin à maille grossière (25–50 m), débits enregistrés à l'entrée d'un carré de 1–2 km autour du lieu, puis ce carré recalculé finement (1–5 m)
 - [ ] Pas de temps par zone : grands pas dans les zones calmes, petits dans les zones profondes (supprime aussi les petits écarts vus dans les ravins quand une rivière profonde est simulée)
   - Reporté : gain surtout quand une rivière profonde est dans la zone ; le calcul en deux temps réduit déjà le besoin.
+  - Essayé ensuite (moteur processeur, branche `experiment/pas-par-zone`) : les mailles profondes ne sont que 2 à 4 % du bassin, mais le schéma n'accepte qu'un rapport de pas de 2 sans fausser les pics (rapport 2 : pic −0,05 % ; rapport 3 : +1 % ; rapport 4 : +7 %) ; à rapport 2, le tri des mailles à chaque pas mange presque tout le gain (≈ 1,1 fois plus rapide). Non retenu.
 - [ ] Calcul processeur sur plusieurs cœurs (appareils sans carte graphique)
   - Reporté : demande une isolation de la page que GitHub Pages ne permet pas sans contournement (risque de casser les fonds de carte IGN) ; utile seulement sans carte graphique (WebGPU est désormais courant).
 - [x] Chargement : bibliothèques (MapLibre, proj4) dans des fichiers à part, gardés en cache d'une version à l'autre (163 Ko à retélécharger au lieu de 1,2 Mo) ; le chargement à la demande de la 3D, de la comparaison et de la coupe ne gagnerait que ≈ 4 % (MapLibre = 77 % du code, nécessaire dès l'ouverture)
