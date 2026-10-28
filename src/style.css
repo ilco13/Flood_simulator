@@ -1554,3 +1554,34 @@ details.advanced h3 {
 .struct-pop .hint {
   margin: 4px 0 0;
 }
+
+/* Mode simple : réglages avancés masqués, étapes numérotées */
+body.simple .adv {
+  display: none !important;
+}
+.mode-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 16px 0;
+}
+.mode-box .hint {
+  margin: 0;
+}
+body:not(.simple) #simple-intro {
+  visibility: hidden;
+  height: 0;
+}
+body.simple .scroll {
+  counter-reset: step;
+}
+body.simple .scroll > section:not(.adv):not(.about):not(#saved) > h2::before {
+  counter-increment: step;
+  content: counter(step) '. ';
+  color: var(--accent);
+}
+
+.share-row {
+  margin-top: 8px;
+}

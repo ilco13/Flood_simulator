@@ -1,6 +1,7 @@
 import { SnapshotStore, quantize } from '../sim/snapshots.js';
 import { WaterCanvas } from '../render/water.js';
-import { deleteRun, exportRun, formatSize, listRuns, loadRun, packRun, renameRun, saveRun } from '../data/runStore.js';
+import { AUTO_KEEP, deleteRun, exportRun, formatSize, listRuns, loadRun, packRun, renameRun, runsOlderThan, runsToPrune, saveRun } from '../data/runStore.js';
+import { cacheClear } from '../data/cache.js';
 import { fitBoundsOf, setWaterCanvas } from '../map.js';
 import { gridCornersWgs, toL93, toWgs } from '../geo.js';
 import { $, fmtNum, state } from './core.js';
@@ -131,6 +132,10 @@ export async function autoSave(run, partial) {
     });
     await saveRun(rec);
     run.savedId = rec.meta.id;
+    // Demande au navigateur de ne pas effacer ces données quand l'appareil manque de place
+    navigator.storage?.persist?.().catch(() => {});
+    // Nettoyage : seules les AUTO_KEEP dernières simulations non renommées sont gardées
+    for (const id of runsToPrune(await listRuns(), AUTO_KEEP, run.savedId)) await deleteRun(id);
     note.textContent = `Simulation enregistrée dans ce navigateur (${formatSize(rec.meta.size)}).`;
   } catch (e) {
     console.error(e);
@@ -149,6 +154,7 @@ export async function refreshSaved() {
     ul.innerHTML = '<li class="empty">Stockage indisponible dans ce navigateur (navigation privée ?).</li>';
     return;
   }
+  renderStorage(runs);
   if (!runs.length) {
     ul.innerHTML = '<li class="empty">Aucune simulation enregistrée pour l\'instant.</li>';
     return;
@@ -271,4 +277,46 @@ export async function openSaved(id) {
     console.error(e);
     prog.error(`Ouverture impossible : ${e.message || e}`);
   }
+}
+
+/* ---------- Place utilisée ---------- */
+
+async function renderStorage(runs) {
+  const el = $('storage-info');
+  if (!el) return;
+  const runsSize = runs.reduce((a, r) => a + (r.size || 0), 0);
+  let est = null;
+  try {
+    est = await navigator.storage?.estimate?.();
+  } catch {
+    est = null;
+  }
+  const other = est?.usage ? Math.max(0, est.usage - runsSize) : null;
+  el.textContent =
+    `Place utilisée : ${formatSize(runsSize)} pour ${runs.length} simulation${runs.length > 1 ? 's' : ''}` +
+    (other != null ? `, ${formatSize(other)} de données téléchargées gardées en cache (relief, occupation du sol…)` : '') +
+    (est?.quota ? ` ; ${formatSize(est.quota)} disponibles pour cette page.` : '.') +
+    ` Les ${AUTO_KEEP} dernières simulations sont gardées ; renommez-en une pour la conserver au-delà.`;
+}
+
+export function setupStorage() {
+  $('clean-old').onclick = async () => {
+    const ids = runsOlderThan(await listRuns(), 30, Date.now(), state.run?.savedId);
+    if (!ids.length) return alert("Aucune simulation de plus de 30 jours.");
+    if (!confirm(`Supprimer ${ids.length} simulation${ids.length > 1 ? 's' : ''} de plus de 30 jours ?`)) return;
+    for (const id of ids) await deleteRun(id);
+    refreshSaved();
+  };
+  $('clean-cache').onclick = async () => {
+    if (!confirm('Vider le cache des données téléchargées ? Elles seront retéléchargées au prochain calcul.')) return;
+    await cacheClear();
+    refreshSaved();
+  };
+  $('clean-all').onclick = async () => {
+    const runs = await listRuns();
+    if (!runs.length) return;
+    if (!confirm(`Supprimer les ${runs.length} simulations enregistrées ? (Exportez d'abord celles à garder.)`)) return;
+    for (const r of runs) await deleteRun(r.id);
+    refreshSaved();
+  };
 }

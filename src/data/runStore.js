@@ -116,6 +116,22 @@ export async function saveRun(rec) {
   return rec.meta;
 }
 
+export const AUTO_KEEP = 20;
+
+/**
+ * Simulations enregistrées automatiquement à supprimer : au-delà des AUTO_KEEP plus récentes ;
+ * celles renommées ou importées, et celle affichée, sont toujours gardées.
+ */
+export function runsToPrune(runs, keep = AUTO_KEEP, currentId = null) {
+  const auto = runs.filter((r) => !r.kept && !r.imported && r.id !== currentId).sort((a, b) => (a.created < b.created ? 1 : -1));
+  return auto.slice(keep).map((r) => r.id);
+}
+
+/** Simulations de plus de `days` jours (sauf celle affichée). */
+export function runsOlderThan(runs, days, now = Date.now(), currentId = null) {
+  return runs.filter((r) => r.id !== currentId && now - Date.parse(r.created) > days * 864e5).map((r) => r.id);
+}
+
 export async function listRuns() {
   const all = await tx(['meta'], 'readonly', (t) => t.objectStore('meta').getAll());
   return all.sort((a, b) => (a.created < b.created ? 1 : -1));
@@ -132,6 +148,7 @@ export async function renameRun(id, name) {
   const meta = await tx(['meta'], 'readonly', (t) => t.objectStore('meta').get(id));
   if (!meta) return;
   meta.name = name;
+  meta.kept = true; // renommée : gardée par le nettoyage automatique
   await tx(['meta'], 'readwrite', (t) => t.objectStore('meta').put(meta));
 }
 

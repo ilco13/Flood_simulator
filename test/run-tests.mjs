@@ -11,6 +11,7 @@ import { floodQuantiles, annualMaxima, gumbelQuantiles, transposeQ } from '../sr
 import { buildRainZones, zoneCum, zoneOf } from '../src/hydrology/rainField.js';
 import { amcFromWetness, amcIndex, yearsOf, arealHourly, rainWindow, amcFromAntecedent, antecedentIndex, episodeScores, parisDayStart } from '../src/hydrology/episode.js';
 import { parseFlowCsv, topFloods, sameRiver } from '../src/data/hydro.js';
+import { runsToPrune, runsOlderThan } from '../src/data/runStore.js';
 import { runMetrics, analyseComparison, diffCodes, durationAbove } from '../src/sim/compare.js';
 import { drainageLabels, basinMask, accumulation, upstreamMask, flowDirections } from '../src/hydrology/terrain.js';
 
@@ -370,6 +371,18 @@ await test('crues d\'une station : maxima annuels (septembre–août) et loi de 
   assert.ok(Math.abs(g.q10 - t10) < 0.03 * t10 && Math.abs(g.q100 - t100) < 0.03 * t100, JSON.stringify(g));
   assert.ok(Math.abs(transposeQ(100, 300, 600) - 100 * 2 ** 0.8) < 1e-9);
   assert.ok(sameRiver("L'Arc", 'Arc') && sameRiver('La Durance', 'Durance') && !sameRiver("L'Arc", 'La Cause'));
+});
+
+await test('stockage : simulations à supprimer (nettoyage automatique, plus de 30 jours)', () => {
+  const day = (n) => new Date(Date.UTC(2026, 0, 1) + n * 864e5).toISOString();
+  const runs = Array.from({ length: 25 }, (_, i) => ({ id: `r${i}`, created: day(i) }));
+  runs[0].kept = true; // renommée
+  runs[1].imported = true;
+  const prune = runsToPrune(runs, 20, 'r2');
+  // 22 automatiques hors r2 (r3…r24) : on garde les 20 plus récentes, on supprime r3 et r4
+  assert.deepEqual(prune.sort(), ['r3', 'r4']);
+  const now = Date.parse(day(40));
+  assert.deepEqual(runsOlderThan(runs, 30, now, 'r5').sort(), ['r0', 'r1', 'r2', 'r3', 'r4', 'r6', 'r7', 'r8', 'r9']);
 });
 
 await test('débits de crue estimés (CRUPEDIX + gradex)', () => {

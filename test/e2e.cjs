@@ -29,6 +29,10 @@ async function runSite(browser, key) {
     await page.goto(url);
     for (let i = 0; i < 90 && !(await page.evaluate(() => !!window.floodApp?.ctrl3d)); i++) await page.waitForTimeout(1000);
     await page.evaluate(() => localStorage.clear());
+    // Premier lancement : mode simple (réglages avancés masqués), puis passage en mode complet
+    const simple = await page.evaluate(() => document.body.classList.contains('simple') && getComputedStyle(document.querySelector('#obs-box')).display === 'none');
+    check(simple, 'premier lancement en mode simple');
+    if (simple) await page.click('#mode-toggle');
     await page.evaluate(([lon, lat]) => window.floodApp.map.jumpTo({ center: [lon, lat], zoom: 15 }), [site.lon, site.lat]);
     await page.waitForTimeout(1500);
     await page.click('#catch-pick');
@@ -154,6 +158,13 @@ async function runSite(browser, key) {
       return { worst, simMax };
     });
     check(sec && sec.worst < 1.0, `coupe : excès de hauteur dessinée ${sec ? sec.worst.toFixed(2) : '?'} m (max simulé ${sec ? sec.simMax.toFixed(2) : '?'} m)`);
+    // Simulation enregistrée et place utilisée affichée
+    let stor = '';
+    for (let i = 0; i < 20 && !/simulation/.test(stor); i++) {
+      await page.waitForTimeout(1000);
+      stor = await page.evaluate(() => document.querySelector('#storage-info')?.textContent || '');
+    }
+    check(/Place utilisée : .+ pour [1-9]/.test(stor), `stockage : ${stor.slice(0, 120)}`);
     if (outDir) await page.screenshot({ path: `${outDir}/${key}.png` });
   } catch (e) {
     check(false, `erreur : ${String(e.message || e).slice(0, 200)}`);

@@ -25,6 +25,13 @@
         </header>
 
         <div class="scroll">
+          <div id="mode-box" class="mode-box">
+            <p id="simple-intro" class="hint">
+              Mode simple : choisissez le lieu, une pluie (les pluies de référence du lieu s'affichent une fois
+              le lieu analysé), l'humidité du sol, puis lancez.
+            </p>
+            <button id="mode-toggle" class="ghost small" type="button">Mode complet</button>
+          </div>
           <section>
             <h2>Lieu étudié</h2>
             <p id="catch-empty" class="hint">
@@ -39,7 +46,7 @@
               </div>
               <ul id="catch-list" class="catch-list"></ul>
               <p id="catch-info" class="hint"></p>
-              <div id="aval-box" class="aval-box" hidden>
+              <div id="aval-box" class="aval-box adv" hidden>
                 <h3>Rivière en aval</h3>
                 <p id="aval-desc" class="hint"></p>
                 <label class="check"><input type="checkbox" id="aval-on" /> Simuler la rivière en crue (remous à la confluence)</label>
@@ -58,7 +65,7 @@
                 <p id="aval-info" class="hint"></p>
               </div>
             </div>
-            <div id="obs-box">
+            <div id="obs-box" class="adv">
               <span class="lbl">Ouvrages absents du relief</span>
               <p class="hint">
                 Le relief LiDAR est un modèle du sol nu : bâtiments et murs n'y figurent pas.
@@ -103,14 +110,14 @@
                 <input id="rain-h" type="number" inputmode="decimal" value="24" min="0.25" max="96" step="0.25" />
               </label>
             </div>
-            <div class="row2 chips-row">
+            <div class="row2 chips-row adv">
               <div class="chips" data-target="rain-mm" data-values="50,100,150,200,300"></div>
               <div class="chips" data-target="rain-h" data-values="1,3,6,12,24,48"></div>
             </div>
             <div id="rain-ref" class="rain-ref"></div>
-            <canvas id="hyeto" class="chart small" aria-label="Hyétogramme"></canvas>
+            <canvas id="hyeto" class="chart small adv" aria-label="Hyétogramme"></canvas>
             <p id="rain-info" class="hint"></p>
-            <details id="episode-box" class="episode-box">
+            <details id="episode-box" class="episode-box adv">
               <summary>Rejouer une crue mesurée</summary>
               <p class="hint">
                 Une station de mesure des débits proche du lieu, l'une de ses plus fortes crues, et les pluies tombées
@@ -148,14 +155,14 @@
 
           <section>
             <h2>Calcul</h2>
-            <label><span id="res-label">Maille de calcul</span>
+            <label class="adv"><span id="res-label">Maille de calcul</span>
               <select id="res"></select>
             </label>
-            <label class="check">
+            <label class="check adv">
               <input type="checkbox" id="nest-on" />
               Maille fine autour du lieu (calcul en deux temps)
             </label>
-            <div id="nest-opts" class="row2" hidden>
+            <div id="nest-opts" class="row2 adv" hidden>
               <label>Zone fine
                 <select id="nest-r">
                   <option value="500">1 × 1 km</option>
@@ -173,12 +180,12 @@
               </label>
             </div>
             <p id="res-info" class="hint"></p>
-            <label class="check">
+            <label class="check adv">
               <input type="checkbox" id="stop-peak" checked />
               Arrêter une fois le pic de crue passé
             </label>
             <button id="run" class="primary">Lancer la simulation</button>
-            <div class="btn-row">
+            <div class="btn-row share-row">
               <button id="share" class="ghost" type="button">Partager ce scénario</button>
             </div>
             <p id="share-info" class="hint"></p>
@@ -197,7 +204,7 @@
                 <li data-step="sim"><i></i>Simulation de la crue<span></span></li>
               </ul>
             </div>
-            <details id="compare-box" class="compare-box">
+            <details id="compare-box" class="compare-box adv">
               <summary>Comparer plusieurs scénarios</summary>
               <p class="hint">Même lieu, même maille : seules la pluie, l'humidité du sol et la crue de la rivière aval changent. Les simulations sont lancées l'une après l'autre, puis comparées (courbes, tableau, analyse, carte des écarts).</p>
               <div class="btn-row wrap">
@@ -217,9 +224,15 @@
             <h2>Simulations enregistrées</h2>
             <ul id="saved-list" class="saved"></ul>
             <label class="ghost file-btn">Importer un fichier .crue<input type="file" id="import-file" accept=".crue" hidden /></label>
+            <p id="storage-info" class="hint"></p>
+            <div class="btn-row wrap">
+              <button id="clean-old" class="ghost" type="button">Supprimer celles de plus de 30 jours</button>
+              <button id="clean-cache" class="ghost" type="button">Vider le cache des données</button>
+              <button id="clean-all" class="ghost" type="button">Tout supprimer</button>
+            </div>
           </section>
 
-          <section>
+          <section class="adv">
             <details class="advanced">
               <summary>Options avancées</summary>
               <label>Répartition de la pluie dans le temps

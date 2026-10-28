@@ -14,7 +14,7 @@ import { describeRes, updateRainInfo } from './params.js';
 import { prog } from './progress.js';
 import { drawHydro, renderArrows, renderCurrent, togglePlay } from './results.js';
 import { startRun, stopRun } from './run.js';
-import { openSaved, refreshSaved } from './saved.js';
+import { openSaved, refreshSaved, setupStorage } from './saved.js';
 import { setupSearch } from './search.js';
 import { renderSoilInfo } from './soil.js';
 import { setupCatchment } from './study.js';
@@ -22,6 +22,7 @@ import { setupCatchment } from './study.js';
 /* ---------- Interface ---------- */
 
 export function setupUi() {
+  setupMode();
   const shapeSel = $('rain-shape');
   for (const [k, v] of Object.entries(SHAPES)) {
     const o = document.createElement('option');
@@ -138,6 +139,7 @@ export function setupUi() {
       prog.error(`Import impossible : ${err.message || err}`);
     }
   });
+  setupStorage();
   refreshSaved();
 
 
@@ -255,4 +257,32 @@ export function setLayerVisible(name, on) {
             ? ['shadow']
             : ['water', 'water3d'];
   for (const id of ids) if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
+}
+
+/* ---------- Mode simple / complet ---------- */
+
+const MODE_KEY = 'flood-sim-mode';
+
+/** Mode simple au premier lancement (aucun lieu enregistré) ; choix gardé ensuite. */
+export function setupMode() {
+  let mode = null;
+  try {
+    mode = localStorage.getItem(MODE_KEY) || (localStorage.getItem('flood-sim-study') ? 'full' : 'simple');
+  } catch {
+    mode = 'simple';
+  }
+  const apply = (m) => {
+    document.body.classList.toggle('simple', m === 'simple');
+    $('mode-toggle').textContent = m === 'simple' ? 'Mode complet' : 'Mode simple';
+  };
+  apply(mode);
+  $('mode-toggle').onclick = () => {
+    mode = mode === 'simple' ? 'full' : 'simple';
+    try {
+      localStorage.setItem(MODE_KEY, mode);
+    } catch {
+      /* sans importance */
+    }
+    apply(mode);
+  };
 }
