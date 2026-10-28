@@ -132,6 +132,9 @@ export function updateResInfo() {
   describeRes();
 }
 
+/** Nombre de mailles lisible : « 21 000 mailles », « 1,3 M de mailles ». */
+const fmtCells = (n) => (n < 1e5 ? `${fmtNum(Math.round(n / 1000) * 1000)} mailles` : `${fmtNum(n / 1e6, 1)} M de mailles`);
+
 /** Libellés des mailles avec le temps de calcul estimé, et avertissements. */
 export function describeRes() {
   const p = params();
@@ -161,7 +164,7 @@ export function describeRes() {
   }
   const cells = grid.nx * grid.ny;
   const engine = chooseEngine(p, cells);
-  let txt = `${fmtNum(cells / 1e6, 1)} M de mailles, calcul ${engine === 'gpu' ? 'sur la carte graphique' : 'sur le processeur'}.`;
+  let txt = `${fmtCells(cells)}, calcul ${engine === 'gpu' ? 'sur la carte graphique' : 'sur le processeur'}.`;
   if (!engine) {
     txt = `<span class="warn">${fmtNum(cells / 1e6, 1)} M de mailles : trop pour la mémoire de ${state.gpu ? 'cet appareil' : 'ce navigateur sans carte graphique'}. Choisissez une maille plus grossière.</span>`;
   } else {
@@ -189,10 +192,19 @@ function describeNest(p, g1, engine1) {
   const s1 = estimateSeconds(p, g1.nx * g1.ny, engine1);
   const s2 = estimateSeconds(p2, cells2, engine2);
   const km = (box.bbox.xmax - box.bbox.xmin) / 1000;
-  return (
+  let txt =
     `Calcul en deux temps : bassin à ${g1.dx} m (≈ ${fmtDur(s1)}), puis zone fine ${fmtNum(km, 1)} × ${fmtNum((box.bbox.ymax - box.bbox.ymin) / 1000, 1)} km ` +
-    `à ${p.nest.res} m (${fmtNum(cells2 / 1e6, 1)} M de mailles, ≈ ${fmtDur(s2)}) : <strong>≈ ${fmtDur(s1 + s2)}</strong> en tout.`
-  );
+    `à ${p.nest.res} m (${fmtCells(cells2)}, ≈ ${fmtDur(s2)}) : <strong>≈ ${fmtDur(s1 + s2)}</strong> en tout.`;
+  // Tout le bassin à la maille fine : plus juste ; à préférer s'il n'est guère plus long
+  const full = Math.ceil((g1.nx * g1.dx) / p.nest.res) * Math.ceil((g1.ny * g1.dx) / p.nest.res);
+  const engineF = chooseEngine(p2, full);
+  const sF = engineF ? estimateSeconds(p2, full, engineF) : Infinity;
+  if (sF < 1.5 * (s1 + s2)) txt += ` Tout le bassin à ${p.nest.res} m prendrait ≈ ${fmtDur(sF)} : à peine plus long et plus juste, décochez « Maille fine autour du lieu ».`;
+  // Petit bassin encaissé : une maille de bassin grossière sous-estime le pic (lit étalé sur la maille)
+  const main = Math.max(0, ...studyCands().filter((c) => c.kind === 'stream').map((c) => c.areaKm2));
+  if (g1.dx >= 25 && main > 0 && main < 10)
+    txt += ` <span class="warn">Petit bassin (${fmtNum(main, 1)} km²) : à ${g1.dx} m, le lit du cours d'eau est étalé sur toute la maille et le pic est sous-estimé d'environ 10 % ; une maille de bassin de 10 ou 15 m est plus sûre.</span>`;
+  return txt;
 }
 
 export function updateRainInfo() {

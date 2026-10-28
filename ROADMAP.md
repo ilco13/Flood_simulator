@@ -30,7 +30,7 @@ But : rendre le code plus sûr à faire évoluer, et corriger la plus grosse err
 - [x] Ne pas boucher les rues entre bâtiments aux mailles grossières (bâti partiel par maille)
 - [x] Vérifier : en zone urbaine, l'eau contourne les maisons ; une rue entre deux bâtiments reste ouverte — vérifié sur la Torse (Val Saint-André, maille 10 m) : 1 maille bâtie mouillée sur 3 534, 843 mailles de rue en eau
 
-## Étape 2 — Vitesse (≈ 3 séances)
+## Étape 2 — Vitesse (≈ 3 séances) ✅ (deux points reportés)
 
 But : mailles de 1–2 m autour du lieu en quelques minutes.
 
@@ -41,11 +41,13 @@ But : mailles de 1–2 m autour du lieu en quelques minutes.
 - [ ] Calcul processeur sur plusieurs cœurs (appareils sans carte graphique)
   - Reporté : demande une isolation de la page que GitHub Pages ne permet pas sans contournement (risque de casser les fonds de carte IGN) ; utile seulement sans carte graphique (WebGPU est désormais courant).
 - [x] Chargement : bibliothèques (MapLibre, proj4) dans des fichiers à part, gardés en cache d'une version à l'autre (163 Ko à retélécharger au lieu de 1,2 Mo) ; le chargement à la demande de la 3D, de la comparaison et de la coupe ne gagnerait que ≈ 4 % (MapLibre = 77 % du code, nécessaire dès l'ouverture)
-- [ ] Vérifier : même résultat au point étudié (±5 %) qu'un calcul fin sur tout le bassin, au moins 5 fois plus vite
+- [x] Vérifier : même résultat au point étudié (±5 %) qu'un calcul fin sur tout le bassin, au moins 5 fois plus vite — atteint sur la Torse ; pas sur un petit ravin (voir ci-dessous)
   - Mesuré sur la Torse (80 mm en 1 h), référence 10 m d'un seul tenant : bassin 25 m + zone 2 km à 10 m → −6 %, 7 fois plus vite ; à maille égale → −2 % (couplage fidèle). L'écart restant vient de la maille du bassin.
+  - Remesuré après les étapes 3–5 (80 mm en 1 h) : Torse (21 km²), référence 10 m d'un seul tenant 246 m³/s en 245 s ; bassin 25 m + zone 2 km à 10 m → 246 m³/s (+0,04 %) en 36 s, 7 fois plus vite ✓.
+  - Verdalaï (4,5 km², ravin étroit), référence 5 m : 69 m³/s. Tout à 10 m −5 %, tout à 25 m −8 % ; bassin 10 m + zone à 5 m −6 % ; bassin 25 m + zone à 5 m −11 % ; à maille égale (10 m + zone à 10 m) −2 %. Le couplage reste fidèle : l'écart vient de la maille grossière, qui étale le lit du ravin sur toute la maille. Un frottement du lit corrigé selon sa largeur a été essayé : trop sensible (à 25 m, pic de −25 % à +14 % selon le réglage), non retenu. L'application le signale désormais : avertissement pour un bassin de moins de 10 km² calculé à 25 m ou plus, et conseil de calculer tout le bassin à la maille fine quand ce n'est guère plus long.
 - [x] Lit des cours d'eau : frottement d'un lit naturel (et non de la ripisylve) — résultats beaucoup moins dépendants de la maille
 
-## Étape 3 — Rejouer une crue réelle et caler le modèle (≈ 3 séances)
+## Étape 3 — Rejouer une crue réelle et caler le modèle (≈ 3 séances) ✅
 
 But : confronter le simulateur aux mesures et régler ses paramètres sur le terrain.
 
