@@ -69,7 +69,11 @@ But : moins de réglages « au jugé ».
   - Corrigé au passage : les départements voisins n'étaient pas tous lus (géocodage inverse IGN muet loin des adresses ; lecture arrêtée trop tôt) → service des communes de l'État et lecture de tous les départements.
   - Ganière 09/09/2002 sans calage : −53 % (5 stations d'Ardèche) → −35 % (9 stations, dont le Gard : La Grand-Combe 257 mm, Salindres 510 mm).
   - Arc, réglage ×1,5 : 2019 +26 %, 2008 +10 % (les deux dans ±30 %).
-- [ ] Ponts et buses : ouvrages repérés sur les cours d'eau étudiés, dimensions estimées ou saisies (largeur, hauteur sous tablier), débordement par-dessus la route au-delà de leur capacité (pont de l'avenue de Villelongue)
+- [x] Ponts et buses : ouvrages repérés sur les cours d'eau étudiés, dimensions estimées ou saisies (largeur, hauteur sous tablier), débordement par-dessus la route au-delà de leur capacité (pont de l'avenue de Villelongue)
+  - Repérage : remblai qui barre le lit (plus d'1 m au-dessus du lit amont et de la maille suivante, impossible à contourner dans un carré d'≈ 50 m), mailles de 10 m ou moins ; à 25–50 m, les « remblais » vus sont surtout des bosses du relief (211 sur la Roya) : le lit y reste creusé comme avant.
+  - Dimensions par défaut : ouvrage qui laisse passer la crue centennale estimée ; modifiables sur la carte ; option embâcles (un tiers, deux tiers, bouché).
+  - Calcul identique dans les deux moteurs (débit maximal dans une buse : 5,22 m³/s processeur, 5,21 GPU).
+  - Verdalaï × avenue de Villelongue (pluie de test, 21 m³/s au lieu) : repéré à 10 m comme à 5 m (remblai de 2,6 m à 10 m, 4,6 m à 5 m) ; l'ouvrage estimé passe 13 à 17 m³/s, la route est submergée de 10 à 23 cm. À corriger avec les vraies dimensions du pont.
 - [ ] Rivière aval : reprendre les débits de crue décennale / centennale des stations quand ils existent, à la place de la formule
 
 ## Étape 5 — Partage et confort (≈ 2 séances)

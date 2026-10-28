@@ -4,6 +4,7 @@ import { makeHyetograph } from '../src/hydrology/rain.js';
 import { runoffMm, runoffRate, retentionMm, adjustCn, meanRunoffHyeto } from '../src/hydrology/scs.js';
 import { CpuBackend, simulate } from '../src/sim/driver.js';
 import { CpuSolver } from '../src/sim/cpuSolver.js';
+import { culvertQ, defaultOpening } from '../src/sim/culvert.js';
 import { buildGauges, prepareTerrain } from '../src/sim/model.js';
 import { rasterizeLine } from '../src/data/rivers.js';
 import { floodQuantiles } from '../src/hydrology/flood.js';
@@ -256,6 +257,58 @@ await test('pont en remblai dans le MNT : lit creusé en pente continue vers l\'
     const a = cells[n - 1];
     const b = cells[n];
     assert.ok(Math.abs(a - b) === 1 || Math.abs(a - b) === nx, 'maille reliée par un coin seulement');
+  }
+});
+
+await test('pont ou buse : repéré sous le remblai, capacité limitée, route submergée au-delà', async () => {
+  // Vallée nord → sud, remblai routier de 3 m sur 8 m de large en travers
+  const nx = 30, ny = 60, dx = 2, N = nx * ny;
+  const grid = { xmin: 0, ymin: 0, xmax: nx * dx, ymax: ny * dx, nx, ny, dx };
+  const dem = new Float32Array(N);
+  for (let j = 0; j < ny; j++)
+    for (let i = 0; i < nx; i++) {
+      let zz = 100 - j * 0.02 + Math.abs(i - 15) * 0.3;
+      if (j >= 28 && j < 32) zz = Math.max(zz, 100 - 30 * 0.02 + 3);
+      dem[j * nx + i] = zz;
+    }
+  const rivers = { features: [{ type: 'Feature', properties: { nature: 'Ecoulement naturel' }, geometry: { type: 'LineString', coordinates: [[31, 119], [31, 1]] } }] };
+  const t = prepareTerrain({ grid, dem, rivers, burnDepth: 0.5, structures: true });
+  assert.equal(t.structures?.length, 1, 'un ouvrage repéré');
+  const st = t.structures[0];
+  for (const k of st.cells) assert.equal(t.z[k], dem[k], 'remblai rétabli');
+  assert.ok(st.crest - st.invert > 2.5 && st.crest - st.invert < 4, `hauteur du remblai ${st.crest - st.invert}`);
+  assert.ok(Math.floor(st.up / nx) < 29 && Math.floor(st.down / nx) > 30, 'entrée en amont, sortie en aval');
+  // Lois de débit : continues entre écoulement libre et en charge, nulles sans charge
+  const qa = culvertQ(st.invert + 1.2 * 1 - 1e-6, -Infinity, st.invert, 1, 2);
+  const qb = culvertQ(st.invert + 1.2 * 1 + 1e-6, -Infinity, st.invert, 1, 2);
+  assert.ok(Math.abs(qa - qb) / qa < 0.12, `raccord libre / en charge ${qa.toFixed(2)} / ${qb.toFixed(2)}`);
+  assert.equal(culvertQ(st.invert - 0.1, -Infinity, st.invert, 1, 2), 0);
+  assert.ok(culvertQ(st.invert + 0.5, st.invert + 0.5, st.invert, 1, 2) === 0, 'niveaux égaux : pas de débit');
+  // Dimensions par défaut : passent la crue centennale estimée, entrée juste pleine
+  for (const area of [0.05, 2, 40]) {
+    const d = defaultOpening(st.crest, st.invert, area);
+    assert.ok(Math.abs(culvertQ(st.invert + d.a, -Infinity, st.invert, d.a, d.b) - d.qd) < 0.1 * d.qd + 0.3, JSON.stringify(d));
+  }
+  // Apport de 3 m³/s à l'amont : grande buse → passe dessous ; petite → route submergée
+  for (let i = 0; i < nx; i++) t.z[i] += 20; // bord amont fermé
+  const run = async (a, b) => {
+    const model = { nx, ny, dx, z: t.z, S: new Float32Array(N).fill(-1), manning: new Float32Array(N).fill(0.04),
+      inflow: { cells: Int32Array.from([2 * nx + 15]), Q: 3, ramp: 300 },
+      links: [{ ku: st.up, kd: st.down, inv: st.invert, a, b }] };
+    const be = new CpuBackend(model, []);
+    await simulate(be, { hyeto: makeHyetograph({ totalMm: 0, durationH: 1, shape: 'uniform' }), totalTime: 3600, gaugeEvery: 300, snapshotEvery: 3600 });
+    const mx = await be.readMaxima();
+    let over = 0;
+    for (const k of st.cells) over = Math.max(over, mx.hmax[k]);
+    const m = be.massBalance();
+    return { over, q: mx.linkQ[0], m };
+  };
+  const big = await run(2, 3);
+  assert.ok(big.over < 0.01 && Math.abs(big.q - 3) < 0.3, `grande buse : ${big.q.toFixed(2)} m³/s, ${big.over.toFixed(2)} m sur la route`);
+  const small = await run(0.5, 0.4);
+  assert.ok(small.over > 0.05 && small.q < 1, `petite buse : ${small.q.toFixed(2)} m³/s, ${small.over.toFixed(2)} m sur la route`);
+  for (const r of [big, small]) {
+    assert.ok(Math.abs(r.m.rain - r.m.out - r.m.stored) < 1e-3 * Math.max(1, r.m.out + r.m.stored), `bilan ${JSON.stringify(r.m)}`);
   }
 });
 

@@ -3,7 +3,7 @@
 
 import { LAYERS } from '../config.js';
 import { fetchFloatGrid, fetchRgbaGrid } from './wms.js';
-import { fetchRivers } from './rivers.js';
+import { fetchRivers, nearestRiverName } from './rivers.js';
 import { fetchBuildings } from './buildings.js';
 import { classifyRgba, classFractions } from '../hydrology/landcover.js';
 import { prepareTerrain, buildGauges, landcoverOversampling, regroupSamples } from '../sim/model.js';
@@ -20,7 +20,7 @@ function geomToWgs(g) {
 const post = (type, data, transfer) => self.postMessage({ type, ...data }, transfer || []);
 
 self.onmessage = async (e) => {
-  const { grid, burnDepth, outlet, upstreamOf, obstacles, gauges: gaugeDefs, buildingsBox } = e.data;
+  const { grid, burnDepth, outlet, upstreamOf, obstacles, gauges: gaugeDefs, buildingsBox, structures } = e.data;
   try {
     const last = {};
     const step = (key, p, detail) => {
@@ -81,7 +81,11 @@ self.onmessage = async (e) => {
     const classes = regroupSamples(sub, grid, f);
 
     step('prep', 0.4);
-    const terrain = prepareTerrain({ grid, dem, rivers, burnDepth, outlet, upstreamOf, obstacles, buildings });
+    const terrain = prepareTerrain({ grid, dem, rivers, burnDepth, outlet, upstreamOf, obstacles, buildings, structures: !!structures });
+    // Ponts et buses : seulement dans le bassin simulé, avec le nom du cours d'eau
+    const structs = (terrain.structures || [])
+      .filter((s) => !terrain.mask || (terrain.mask[s.up] && terrain.mask[s.down]))
+      .map((s) => ({ ...s, name: nearestRiverName(rivers, s.x, s.y, 60) }));
     // Points de suivi : seulement ceux qui coupent le bassin simulé.
     // Ceux du lieu étudié sont toujours gardés (leur ligne de mesure est à l'exutoire, juste
     // à l'aval du bassin) ; les points de l'Arc seulement s'ils touchent le bassin simulé.
@@ -134,6 +138,7 @@ self.onmessage = async (e) => {
         burned: terrain.burned,
         bldFrac: terrain.bldFrac || null,
         channel: terrain.channel || null,
+        structures: structs,
         bldCells: terrain.bldCells || 0,
         bldCount: terrain.bldCount || 0,
         gauges,

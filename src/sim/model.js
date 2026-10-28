@@ -1,6 +1,6 @@
 // Préparation des entrées du modèle à partir des données brutes.
 
-import { burnRivers, riverDirectionAt, rasterizeLine, isBurnable } from '../data/rivers.js';
+import { burnRivers, riverDirectionAt, rasterizeLine, isBurnable, STRUCT_MIN_BUMP } from '../data/rivers.js';
 import { drainageLabels, basinMask, accumulation, upstreamMask, flowDirections } from '../hydrology/terrain.js';
 import { buildRunoffFields, hortonM0 } from '../hydrology/scs.js';
 import { cellOf } from '../geo.js';
@@ -9,11 +9,18 @@ import { cellOf } from '../geo.js';
  * Prétraitements indépendants de la pluie : gravure du réseau, bassin versant.
  * @returns {{ z: Float32Array, mask: Uint8Array, basinCells: number, burned: number, breached: number }}
  */
-export function prepareTerrain({ grid, dem, rivers, burnDepth, outlet, upstreamOf, obstacles, buildings }) {
+export function prepareTerrain({ grid, dem, rivers, burnDepth, outlet, upstreamOf, obstacles, buildings, structures = false }) {
   const z = dem.slice();
-  const burned = rivers && burnDepth > 0 ? burnRivers(grid, z, rivers, burnDepth) : 0;
+  const raw = structures ? [] : null;
+  const burned = rivers && burnDepth > 0 ? burnRivers(grid, z, rivers, burnDepth, undefined, raw) : 0;
+  // Ouvrages sous les routes : remblai rétabli, l'eau passe par l'ouvrage (capacité limitée)
+  const structs = raw?.length ? selectStructures(grid, z, dem, raw) : [];
   // Ouvrages dessinés par l'utilisateur (absents du MNT, qui est un modèle du sol nu).
   let protect = obstacles?.length ? applyObstacles(grid, z, obstacles) : null;
+  if (structs.length) {
+    protect ??= new Uint8Array(z.length);
+    for (const s of structs) for (const k of s.cells) protect[k] = 1;
+  }
   // Bâtiments BD TOPO : mailles bâties à plus de moitié relevées ; les autres gardent le
   // passage, avec un frottement accru (renvoyé dans bldFrac).
   let bld = null;
@@ -23,6 +30,7 @@ export function prepareTerrain({ grid, dem, rivers, burnDepth, outlet, upstreamO
     else for (let k = 0; k < protect.length; k++) protect[k] |= bld.protect[k];
   }
   const extra = bld ? { bldFrac: bld.frac, bldCells: bld.cells, bldCount: buildings.length } : {};
+  if (structs.length) extra.structures = structs;
   // Mailles du lit des cours d'eau BD TOPO : frottement d'un lit naturel (voir buildModel)
   if (rivers) extra.channel = channelMask(grid, rivers);
   const { label, breached, parent, order, filled } = drainageLabels(z, grid.nx, grid.ny, {
@@ -53,6 +61,23 @@ export function prepareTerrain({ grid, dem, rivers, burnDepth, outlet, upstreamO
     const pts = Array.isArray(upstreamOf) ? upstreamOf : [upstreamOf];
     const down = flowDirections(filled, parent, order, grid.nx, grid.ny);
     const acc = accumulation(down, order);
+    // Surface drainée par chaque ouvrage (pour sa capacité par défaut)
+    // (plus forte accumulation autour des mailles amont et aval : derrière le remblai, le
+    // relief comblé est plat et l'écoulement D8 peut éviter la maille amont)
+    for (const st of structs) {
+      let m = 0;
+      for (const k0 of [st.up, st.down]) {
+        const i0 = k0 % grid.nx;
+        const j0 = (k0 - i0) / grid.nx;
+        for (let dj = -1; dj <= 1; dj++)
+          for (let di = -1; di <= 1; di++) {
+            const i = i0 + di;
+            const j = j0 + dj;
+            if (i >= 0 && j >= 0 && i < grid.nx && j < grid.ny) m = Math.max(m, acc[j * grid.nx + i]);
+          }
+      }
+      st.areaKm2 = (m * grid.dx * grid.dx) / 1e6;
+    }
     const outletKs = [];
     for (const pt of pts) {
       const k = snapToStream(grid, acc, pt);
@@ -69,6 +94,84 @@ export function prepareTerrain({ grid, dem, rivers, burnDepth, outlet, upstreamO
     }
   }
   return { z, mask, basinCells, burned, breached, ...extra };
+}
+
+/**
+ * Ouvrages sous les routes retenus : remblai court (au plus 60 m ou 2 mailles le long du cours
+ * d'eau) qui barre vraiment la vallée : pour passer de l'amont à l'aval sans le traverser, l'eau
+ * doit monter d'au moins STRUCT_MIN_BUMP (sinon ce n'est qu'une bosse du lit, contournée). Son
+ * relief d'origine est rétabli ; une maille ne sert qu'à un ouvrage.
+ */
+export function selectStructures(grid, z, dem, raw) {
+  const { nx, dx, xmin, ymax } = grid;
+  const used = new Set();
+  const out = [];
+  for (const s of raw) {
+    if (s.cells.length * dx > Math.max(60, 2 * dx)) continue;
+    const ks = [s.up, s.down, ...s.cells];
+    if (ks.some((k) => used.has(k))) continue;
+    const spill = bypassLevel(grid, dem, s);
+    const crest = Math.min(s.crest, spill);
+    if (crest - (s.base ?? Math.max(dem[s.up], dem[s.down])) <= STRUCT_MIN_BUMP) continue;
+    ks.forEach((k) => used.add(k));
+    for (const k of s.cells) z[k] = dem[k];
+    const mid = s.cells[s.cells.length >> 1];
+    const i = mid % nx;
+    const j = (mid - i) / nx;
+    out.push({ up: s.up, down: s.down, cells: s.cells, invert: s.invert, crest, x: xmin + (i + 0.5) * dx, y: ymax - (j + 0.5) * dx });
+  }
+  return out;
+}
+
+/**
+ * Niveau le plus bas à atteindre pour aller de la maille amont à la maille aval sans passer
+ * par le remblai (chemin dont le point le plus haut est le plus bas), dans un carré d'environ
+ * 50 m autour ; Infinity si le remblai barre tout le carré.
+ */
+export function bypassLevel(grid, dem, s) {
+  const { nx, ny, dx } = grid;
+  const R = Math.max(3, Math.ceil(50 / dx));
+  const i0 = s.up % nx;
+  const j0 = (s.up - i0) / nx;
+  const W = 2 * R + 1;
+  const blocked = new Set(s.cells);
+  const best = new Float64Array(W * W).fill(Infinity);
+  const doneW = new Uint8Array(W * W);
+  const loc = (k) => {
+    const i = k % nx;
+    const j = (k - i) / nx;
+    const a = i - i0 + R;
+    const b = j - j0 + R;
+    return a < 0 || b < 0 || a >= W || b >= W ? -1 : b * W + a;
+  };
+  const target = loc(s.down);
+  if (target < 0) return Infinity;
+  best[R * W + R] = dem[s.up];
+  for (;;) {
+    let m = -1;
+    for (let q = 0; q < W * W; q++) if (!doneW[q] && best[q] < Infinity && (m < 0 || best[q] < best[m])) m = q;
+    if (m < 0) return Infinity;
+    if (m === target) return best[m];
+    doneW[m] = 1;
+    const a = m % W;
+    const b = (m - a) / W;
+    for (let db = -1; db <= 1; db++)
+      for (let da = -1; da <= 1; da++) {
+        if (!da && !db) continue;
+        if (da && db) continue; // 4 voisins : pas de passage en diagonale entre deux mailles du remblai
+        const aa = a + da;
+        const bb = b + db;
+        if (aa < 0 || bb < 0 || aa >= W || bb >= W) continue;
+        const i = i0 - R + aa;
+        const j = j0 - R + bb;
+        if (i < 0 || j < 0 || i >= nx || j >= ny) continue;
+        const k = j * nx + i;
+        if (blocked.has(k)) continue;
+        const q = bb * W + aa;
+        const v = Math.max(best[m], dem[k]);
+        if (v < best[q]) best[q] = v;
+      }
+  }
 }
 
 /** Mailles traversées par un cours d'eau BD TOPO à ciel ouvert (gravé dans le relief). */

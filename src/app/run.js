@@ -20,6 +20,7 @@ import { accumulateFlowMax, drawHydro, drawHydroThrottled, drawQuantized, probeA
 import { autoSave, findPlaceName } from './saved.js';
 import { studyCands, studyGauges } from './study.js';
 import { setLayerVisible, setViewMode, showResults } from './ui.js';
+import { buildLinks, showStructures, structureResults, structuresOn, structuresSummary } from './structures.js';
 
 /* ---------- Données ---------- */
 
@@ -56,7 +57,7 @@ export function loadData(grid, p) {
   const gauges = [...studyGauges(p), ...GAUGES];
   const obstacles = obstaclesL93();
   const buildingsBox = p.bdtopo ? buildingsBoxOf(grid) : null;
-  const key = JSON.stringify([grid.xmin, grid.ymin, grid.nx, grid.ny, grid.dx, p.burn, upstreamOf, obstacles, gauges.map((g) => [g.id, g.x, g.y]), buildingsBox]);
+  const key = JSON.stringify([grid.xmin, grid.ymin, grid.nx, grid.ny, grid.dx, p.burn, upstreamOf, obstacles, gauges.map((g) => [g.id, g.x, g.y]), buildingsBox, structuresOn(p, grid)]);
   if (state.data?.key === key) return Promise.resolve(state.data);
   return new Promise((resolve, reject) => {
     const w = new Worker(new URL('../data/prepWorker.js', import.meta.url), { type: 'module' });
@@ -81,7 +82,7 @@ export function loadData(grid, p) {
       reject(new Error(await workerFailure(e, 'la préparation des données')));
     };
     const outlet = p.zone === 'basin' ? OUTLET : null;
-    w.postMessage({ grid, burnDepth: p.burn, outlet, upstreamOf, obstacles, gauges, buildingsBox });
+    w.postMessage({ grid, burnDepth: p.burn, outlet, upstreamOf, obstacles, gauges, buildingsBox, structures: structuresOn(p, grid) });
   });
 }
 
@@ -224,6 +225,11 @@ async function runOnce(opts = {}) {
       capInfiltration: p.capInf,
     });
     model.sources = [];
+    // Ponts et buses : passage limité sous le remblai, l'eau passe au-dessus au-delà
+    const st = buildLinks(data, grid, p);
+    model.links = st.links;
+    run.structures = st.info;
+    showStructures(st.info);
     // Épisode réel : pluie variable dans l'espace (blocs d'environ 1 km, d'après les stations)
     if (p.rainStations) {
       model.rainZones = buildRainZones(grid, p.rainStations, p.hourly.length);
@@ -467,6 +473,9 @@ export function finishRun(run, mass) {
     const r = mainReceiver()?.receiver;
     txt += `<br>Rivière aval${r?.name ? ` (${escHtml(r.name)})` : ''} maintenue en crue à <strong>${fmtNum(run.params.aval.Q)} m³/s</strong> pendant tout l'épisode.`;
   }
+  run.structureRes = structureResults(run);
+  showStructures(run.structureRes);
+  txt += structuresSummary(run);
   if (state.data.warnings?.length) txt += `<br><span class="warn">Données : ${state.data.warnings.join(' ; ')}.</span>`;
   $('summary').innerHTML = txt;
   // Vitesse observée sur cet appareil (pour les prochaines estimations), si le calcul a duré.

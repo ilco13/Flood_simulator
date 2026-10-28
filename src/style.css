@@ -1536,3 +1536,21 @@ details.advanced h3 {
   background: color-mix(in srgb, #2b8a3e 16%, transparent);
   font-weight: 600;
 }
+
+/* Fiche d'un pont ou d'une buse */
+.struct-pop {
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: #1d2733;
+}
+.struct-dims {
+  display: flex;
+  gap: 8px;
+  margin: 6px 0;
+}
+.struct-dims input {
+  width: 64px;
+}
+.struct-pop .hint {
+  margin: 4px 0 0;
+}

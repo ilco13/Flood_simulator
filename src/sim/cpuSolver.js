@@ -7,6 +7,7 @@
 import { G, H_MIN, FROUDE_MAX, V_MAX, BOUNDARY_SLOPE, THETA } from './scheme.js';
 import { IA_RATIO, HORTON_P } from '../hydrology/scs.js';
 import { zoneCum } from '../hydrology/rainField.js';
+import { applyCulverts } from './culvert.js';
 
 // q : débit de la face au pas précédent ; qm, qp : faces voisines dans la même direction
 // (pondération θ de de Almeida et al. 2012, qui amortit les oscillations).
@@ -88,7 +89,10 @@ export class CpuSolver {
   /**
    * @param {object} p  { nx, ny, dx, z, S, manning }
    */
-  constructor({ nx, ny, dx, z, S, manning, fc = null, m0 = 3, inflow = null, sources = null, rainZones = null }) {
+  constructor({ nx, ny, dx, z, S, manning, fc = null, m0 = 3, inflow = null, sources = null, rainZones = null, links = null }) {
+    // Ouvrages sous les routes : [{ ku, kd, inv, a, b }]
+    this.links = links?.length ? links : null;
+    this.linkQmax = this.links ? new Float32Array(2 * this.links.length) : null;
     // Pluie variable dans l'espace : blocs de pluie (épisodes réels), sinon pluie uniforme
     this.rz = rainZones;
     if (rainZones) {
@@ -268,6 +272,7 @@ export class CpuSolver {
       }
       this.rainVolume += vol * dx * dx;
     }
+    if (this.links) applyCulverts(h, z, this.links, dt, dx, this.linkQmax);
     return hm;
   }
 

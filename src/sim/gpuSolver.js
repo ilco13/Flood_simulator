@@ -7,6 +7,7 @@ import { IA_RATIO, HORTON_P, NO_CAP } from '../hydrology/scs.js';
 import { normalizeSources, flattenSources, sourceDepthRates } from './cpuSolver.js';
 import { MAX_ZONES, zoneCum } from '../hydrology/rainField.js';
 import { fluxFields } from './flux.js';
+import { CD_PRESSURE, Q_SMOOTH } from './culvert.js';
 
 const WG = 16;
 const STEP_STRIDE = 256; // alignement minimal des décalages dynamiques
@@ -273,8 +274,54 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `;
 
+// Ouvrages (buses, ponts sous remblai) : même formule que culvert.js. Un seul fil parcourt
+// tous les ouvrages (quelques dizaines) : pas de conflit quand deux ouvrages partagent une maille.
+const LINK_WGSL = /* wgsl */ `${COMMON}
+struct Link { ku: u32, kd: u32, inv: f32, a: f32, b: f32, p0: f32, p1: f32, p2: f32 };
+@group(0) @binding(1) var<uniform> P: Step;
+@group(0) @binding(2) var<storage, read_write> h: array<f32>;
+@group(0) @binding(3) var<storage, read> z: array<f32>;
+@group(0) @binding(4) var<storage, read> L: array<Link>;
+@group(0) @binding(5) var<storage, read_write> lq: array<f32>;
+
+fn culvertQ(eHi: f32, eLo: f32, inv: f32, a: f32, b: f32) -> f32 {
+  let H = eHi - inv;
+  if (H <= 0.0 || a <= 0.0 || b <= 0.0) { return 0.0; }
+  if (H < 1.2 * a) {
+    let y = min(H, a);
+    let free = 1.7 * b * pow(y, 1.5);
+    let sub = 0.8 * b * y * sqrt(2.0 * C.g * max(0.0, eHi - max(eLo, inv)));
+    return min(free, sub);
+  }
+  return ${CD_PRESSURE} * b * a * sqrt(2.0 * C.g * max(0.0, eHi - max(eLo, inv + 0.5 * a)));
+}
+
+@compute @workgroup_size(1)
+fn main() {
+  let A = C.dx * C.dx;
+  for (var n = 0u; n < arrayLength(&L); n++) {
+    let l = L[n];
+    let eu = z[l.ku] + h[l.ku];
+    let ed = z[l.kd] + h[l.kd];
+    var hi = l.ku;
+    var lo = l.kd;
+    var eHi = eu;
+    var eLo = ed;
+    if (ed > eu) { hi = l.kd; lo = l.ku; eHi = ed; eLo = eu; }
+    let q = culvertQ(eHi, eLo, l.inv, l.a, l.b);
+    var v = 0.0;
+    if (q > 0.0) { v = max(0.0, min(q * P.dt, min(0.5 * h[hi] * A, 0.25 * (eHi - eLo) * A))); }
+    h[hi] = h[hi] - v / A;
+    h[lo] = h[lo] + v / A;
+    lq[2u * n] = lq[2u * n] + (v / P.dt - lq[2u * n]) * min(1.0, P.dt / ${Q_SMOOTH}.0);
+    lq[2u * n + 1u] = max(lq[2u * n + 1u], lq[2u * n]);
+  }
+}
+`;
+
 export class GpuSolver {
-  constructor(device, { nx, ny, dx, z, S, manning, fc = null, m0 = 3, inflow = null, sources = null, rainZones = null }, gauges) {
+  constructor(device, { nx, ny, dx, z, S, manning, fc = null, m0 = 3, inflow = null, sources = null, rainZones = null, links = null }, gauges) {
+    this.links = links?.length ? links : null;
     this.rz = rainZones;
     this.rzData = new Float32Array(4 * MAX_ZONES);
     this.sources = normalizeSources({ sources, inflow });
@@ -314,6 +361,8 @@ export class GpuSolver {
       S: mk(N * 8),
       src: mk(Math.max(1, this.flat?.cells.length || 0) * 4),
       srcRate: mk(Math.max(1, this.flat?.cells.length || 0) * 4),
+      links: mk(Math.max(1, this.links?.length || 0) * 32),
+      linkQ: mk(Math.max(1, this.links?.length || 0) * 8),
       hmax: mk(N * 4),
       tmax: mk(N * 4),
       vmax: mk(N * 4),
@@ -346,6 +395,19 @@ export class GpuSolver {
     }
     q.writeBuffer(this.bufs.S, 0, sfc);
     if (this.flat) q.writeBuffer(this.bufs.src, 0, Uint32Array.from(this.flat.cells));
+    if (this.links) {
+      const lb = new ArrayBuffer(this.links.length * 32);
+      const lu = new Uint32Array(lb);
+      const lf = new Float32Array(lb);
+      this.links.forEach((l, n) => {
+        lu[8 * n] = l.ku;
+        lu[8 * n + 1] = l.kd;
+        lf[8 * n + 2] = l.inv;
+        lf[8 * n + 3] = l.a;
+        lf[8 * n + 4] = l.b;
+      });
+      q.writeBuffer(this.bufs.links, 0, lb);
+    }
 
     // Sections de contrôle
     const cells = [];
@@ -429,6 +491,22 @@ export class GpuSolver {
         { binding: 4, resource: { buffer: b.srcRate, size: Math.max(1, this.flat?.cells.length || 1) * 4 } },
       ],
     });
+
+    if (this.links) {
+      const linkL = this.#layout(['u', 'ud', 'w', 'r', 'r', 'w']);
+      this.linkPipe = this.#pipeline(LINK_WGSL, linkL);
+      this.linkBG = d.createBindGroup({
+        layout: linkL,
+        entries: [
+          { binding: 0, resource: { buffer: b.consts } },
+          { binding: 1, resource: stepBinding },
+          { binding: 2, resource: { buffer: b.h } },
+          { binding: 3, resource: { buffer: b.z } },
+          { binding: 4, resource: { buffer: b.links, size: this.links.length * 32 } },
+          { binding: 5, resource: { buffer: b.linkQ, size: Math.max(16, this.links.length * 8) } },
+        ],
+      });
+    }
 
     this.fluxBG = [0, 1].map((p) =>
       bg(fluxL, [b.consts, stepBinding, b.z, b.h, b.qx[p], b.qy[p], b.qx[1 - p], b.qy[1 - p], b.n]),
@@ -515,6 +593,11 @@ export class GpuSolver {
           pass.setBindGroup(0, this.inflowBG, off);
           pass.dispatchWorkgroups(Math.ceil(this.flat.cells.length / 64));
         }
+        if (this.links) {
+          pass.setPipeline(this.linkPipe);
+          pass.setBindGroup(0, this.linkBG, off);
+          pass.dispatchWorkgroups(1);
+        }
         this.cur = nxt;
       }
       pass.end();
@@ -583,6 +666,7 @@ export class GpuSolver {
       hmax: await this.#read(this.bufs.hmax, this.N * 4),
       tmax: await this.#read(this.bufs.tmax, this.N * 4),
       vmax: await this.#read(this.bufs.vmax, this.N * 4),
+      linkQ: this.links ? (await this.#read(this.bufs.linkQ, Math.max(16, this.links.length * 8))).filter((_, i) => i % 2).slice(0, this.links.length) : null,
     };
   }
 

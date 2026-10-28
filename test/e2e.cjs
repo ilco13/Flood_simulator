@@ -83,10 +83,16 @@ async function runSite(browser, key) {
         hmax,
         gauges: run.gauges.map((g, i) => ({ id: g.id, name: g.name, peak: run.series[i].reduce((m, p) => Math.max(m, p[1]), 0) })),
         avalQ: run.params.aval?.Q ?? null,
+        structs: (run.structureRes || []).map((r) => ({ q: r.qmax, cap: r.qcap, status: r.status, name: r.name, a: r.a, b: r.b, area: r.areaKm2 })),
       };
     });
     check(res.mass == null || Math.abs(res.mass) < 0.01, `bilan de masse ${res.mass ?? 'non mesuré (GPU)'} %`);
     check(Number.isFinite(res.hmax) && res.hmax > 0.1 && res.hmax < 30, `hauteur maximale ${res.hmax.toFixed(2)} m`);
+    // Ponts et buses : débits finis et cohérents avec la capacité
+    const st = res.structs;
+    const bad = st.filter((r) => !Number.isFinite(r.q) || r.q < 0);
+    const cnt = (k) => st.filter((r) => r.status === k).length;
+    check(!bad.length, `ponts et buses : ${st.length} repérés (${cnt('over')} route submergée, ${cnt('full')} en charge, ${cnt('ok')} sans débordement)${bad.length ? ` ; ${bad.length} débits incohérents` : ''}`);
     const g0 = res.gauges.find((g) => g.id.startsWith('study') && norm(g.name).includes(norm(site.river)));
     check(g0 && g0.peak > 1, `débit au droit du lieu ${g0 ? g0.peak.toFixed(1) : '?'} m³/s`);
     if (site.aval) {

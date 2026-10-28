@@ -26,7 +26,10 @@ const { chromium } = require(process.env.PLAYWRIGHT || 'playwright');
         S[k] = (i + j) % 7 === 0 ? 20 : 60;
         n[k] = j % 2 ? 0.04 : 0.08;
         fcap[k] = ((i % 3) + 1) * 4 / 3.6e6; // plafond d'infiltration 4 à 12 mm/h
+        if (i === 40 || i === 41) z[k] += 3; // remblai routier en travers de la vallée
       }
+    // Buse sous le remblai
+    const links = [{ ku: 32 * nx + 39, kd: 32 * nx + 42, inv: z[32 * nx + 39] - 0.5, a: 1, b: 1.5 }];
     // Apport d'une rivière en amont : 8 m³/s sur 3 mailles du fond de la vallée
     const inflow = { cells: Int32Array.from([31 * nx + 4, 32 * nx + 4, 33 * nx + 4]), Q: 8, ramp: 600 };
     const gauges = [{ signed: true, cells: Int32Array.from({ length: 20 }, (_, m) => (22 + m) * nx + 80), wx: new Float32Array(20).fill(-dx), wy: new Float32Array(20) }, { cells: Int32Array.from({ length: 20 }, (_, m) => (22 + m) * nx + 80), wx: new Float32Array(20).fill(dx), wy: new Float32Array(20) }];
@@ -35,9 +38,9 @@ const { chromium } = require(process.env.PLAYWRIGHT || 'playwright');
     const rainZones = buildRainZones({ xmin: 0, ymax: ny * dx, nx, ny, dx }, [{ x: -200, y: 320, rr: Float32Array.of(20, 5) }, { x: 1200, y: 320, rr: Float32Array.of(60, 20) }], 2, 300);
     const opts = { hyeto, totalTime: 2 * 3600, gaugeEvery: 300, snapshotEvery: 3600 };
     const qc = [], qg = [], qsc = [], qsg = [];
-    const cpu = new CpuBackend({ nx, ny, dx, z, S, manning: n, fc: fcap, m0: 3, inflow, rainZones }, gauges);
+    const cpu = new CpuBackend({ nx, ny, dx, z, S, manning: n, fc: fcap, m0: 3, inflow, rainZones, links }, gauges);
     const rc = await simulate(cpu, { ...opts, onGauge: (t, Q) => { qc.push(Q[1]); qsc.push(Q[0]); } });
-    const g = new GpuSolver(gpu.device, { nx, ny, dx, z, S, manning: n, fc: fcap, m0: 3, inflow, rainZones }, gauges);
+    const g = new GpuSolver(gpu.device, { nx, ny, dx, z, S, manning: n, fc: fcap, m0: 3, inflow, rainZones, links }, gauges);
     const rg = await simulate(g, { ...opts, onGauge: (t, Q) => { qg.push(Q[1]); qsg.push(Q[0]); } });
     const hc = await cpu.readDepth(), hg = await g.readDepth();
     let dmax = 0, hmaxc = 0;
@@ -51,11 +54,11 @@ const { chromium } = require(process.env.PLAYWRIGHT || 'playwright');
     let sc = 0, sg = 0;
     for (let k = 0; k < N; k++) { sc += fc.qm[k]; sg += fg.qm[k]; }
     const flowRel = Math.abs(sc - sg) / Math.max(1e-9, sc);
-    return { signedC, signedG, stepsCpu: cpu.steps, stepsGpu: g.steps, hmax: hmaxc, maxDiffH: dmax, maxDiffHmax: dmaxMax, peakC, peakG, flowSumCpu: sc, flowSumGpu: sg, flowRel, blocks: [fg.vec.bx, fg.vec.by], adapter: gpu.label };
+    return { linkC: rc.maxima.linkQ[0], linkG: rg.maxima.linkQ[0], signedC, signedG, stepsCpu: cpu.steps, stepsGpu: g.steps, hmax: hmaxc, maxDiffH: dmax, maxDiffHmax: dmaxMax, peakC, peakG, flowSumCpu: sc, flowSumGpu: sg, flowRel, blocks: [fg.vec.bx, fg.vec.by], adapter: gpu.label };
   });
   console.log(JSON.stringify(out, null, 1));
   await browser.close();
-  const ok = out.signedC < -0.9 * out.peakC && Math.abs(out.signedG - out.signedC) < 0.03 * out.peakC && out.maxDiffHmax < 0.02 && Math.abs(out.peakC - out.peakG) / out.peakC < 0.03 && out.flowRel < 0.05;
+  const ok = out.linkC > 1 && Math.abs(out.linkC - out.linkG) < 0.03 * out.linkC && out.signedC < -0.9 * out.peakC && Math.abs(out.signedG - out.signedC) < 0.03 * out.peakC && out.maxDiffHmax < 0.02 && Math.abs(out.peakC - out.peakG) / out.peakC < 0.03 && out.flowRel < 0.05;
   console.log(ok ? 'GPU ≈ CPU : OK' : 'ÉCART GPU/CPU');
   process.exit(ok ? 0 : 1);
 })();

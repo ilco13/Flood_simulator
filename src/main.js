@@ -9,6 +9,7 @@ import { setupBasemap, setupMapToggles, toggle3d } from './app/mapUi.js';
 import { addDrawPoint, finishDrawing, renderDraw, renderObstacles } from './app/obstacles.js';
 import { updateRainInfo, updateResInfo } from './app/params.js';
 import { addArrowLayer, probeAt, setupMapTip } from './app/results.js';
+import { structureClick } from './app/structures.js';
 import { resolveMapReady } from './app/saved.js';
 import { restoreCatchment, studyPlace } from './app/study.js';
 import { setupUi } from './app/ui.js';
@@ -54,7 +55,7 @@ async function main() {
     if (state.drawing) return addDrawPoint(e);
     if (state.catchMode) studyPlace(e.lngLat.lng, e.lngLat.lat);
     else if (state.sectionMode) placeSection(e.lngLat);
-    else probeAt(e.lngLat);
+    else if (!structureClick(e)) probeAt(e.lngLat);
   });
   setupMapTip();
   state.map.on('mousemove', (e) => {

@@ -32,9 +32,9 @@ self.onmessage = async (e) => {
       },
       shouldStop: () => stop,
     });
-    const { hmax, tmax, vmax } = res.maxima;
+    const { hmax, tmax, vmax, linkQ } = res.maxima;
     self.postMessage(
-      { type: 'done', t: res.t, maxima: { hmax, tmax, vmax }, mass: backend.massBalance() },
+      { type: 'done', t: res.t, maxima: { hmax, tmax, vmax, linkQ }, mass: backend.massBalance() },
       [hmax.buffer, tmax.buffer, vmax.buffer],
     );
   } catch (err) {

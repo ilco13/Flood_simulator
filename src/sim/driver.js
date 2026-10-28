@@ -37,7 +37,7 @@ export class CpuBackend {
   }
   async readMaxima() {
     const s = this.solver;
-    return { hmax: s.hmax, tmax: s.tmax, vmax: s.vmax };
+    return { hmax: s.hmax, tmax: s.tmax, vmax: s.vmax, linkQ: s.linkQmax ? s.linkQmax.filter((_, i) => i % 2) : null };
   }
   massBalance() {
     const s = this.solver;

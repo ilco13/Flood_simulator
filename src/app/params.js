@@ -32,6 +32,8 @@ export function params() {
     // Épisode réel chargé : pluie observée heure par heure à la place de la pluie de projet
     ...episodeParams(),
     bdtopo: $('bati-ign').checked,
+    structures: $('ouvr-on').checked,
+    obstruction: $('ouvr-on').checked ? Number($('ouvr-obst').value) : 0,
     ...avalParams(),
     engine: $('engine').value,
   };

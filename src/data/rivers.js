@@ -193,7 +193,11 @@ export function rasterizeLine(grid, coords, visit) {
  * de son voisinage 3×3 moins `depth`. Cela rétablit la continuité des petits vallats que la
  * maille de calcul ne résout pas, et le passage sous les remblais (buses, ponts).
  */
-export function burnRivers(grid, z, rivers, depth, maxCarve = MAX_CARVE) {
+/**
+ * @param structures (facultatif) tableau rempli avec les remblais traversés (ouvrages sous les
+ *   routes) : creusement de plus de STRUCT_MIN_BUMP m sur une courte longueur, voir enforceDownstream.
+ */
+export function burnRivers(grid, z, rivers, depth, maxCarve = MAX_CARVE, structures = null) {
   const z0 = z.slice();
   const { nx, ny } = grid;
   let count = 0;
@@ -236,7 +240,7 @@ export function burnRivers(grid, z, rivers, depth, maxCarve = MAX_CARVE) {
       paths.push(path);
     }
   }
-  count += enforceDownstream(grid, z, paths, maxCarve);
+  count += enforceDownstream(grid, z, paths, maxCarve, structures, z0);
   return count;
 }
 
@@ -249,7 +253,9 @@ const MAX_CARVE = 15;
  * vers l'aval (les plus hauts d'abord) et une maille plus haute que la précédente est abaissée
  * à son niveau ; un tronçon démarre au niveau du tronçon amont déjà traité qui le touche.
  */
-function enforceDownstream(grid, z, paths, maxCarve) {
+export const STRUCT_MIN_BUMP = 1; // m : remblai au-dessus du lit à partir duquel on voit un ouvrage
+
+function enforceDownstream(grid, z, paths, maxCarve, structures = null, z0 = null) {
   const { nx, ny } = grid;
   const done = new Uint8Array(nx * ny);
   let count = 0;
@@ -267,15 +273,34 @@ function enforceDownstream(grid, z, paths, maxCarve) {
         const kk = jj * nx + ii;
         if (done[kk] && z[kk] < level) level = z[kk];
       }
-    for (const k of path) {
-      if (z[k] > level) {
-        if (z[k] - level <= maxCarve) {
-          z[k] = level;
-          count++;
-        } else level = z[k];
+    // Remblai traversé : relief d'origine plus haut de STRUCT_MIN_BUMP que le plus bas déjà vu
+    // en amont sur le tracé (base) et que la maille qui le suit (ouvrage sous une route)
+    let run = null;
+    let ref = z0 ? z0[k0] : 0;
+    const close = (n) => {
+      if (run && structures && run.start > 0 && n < path.length) {
+        const up = path[run.start - 1];
+        const down = path[n];
+        const base = Math.max(run.ref, z0[down]);
+        if (run.crest - base > STRUCT_MIN_BUMP) structures.push({ cells: run.cells, up, down, invert: run.invert, crest: run.crest, base });
+      }
+      run = null;
+    };
+    for (let n = 0; n < path.length; n++) {
+      const k = path[n];
+      if (z0 && !done[k] && z0[k] - ref > STRUCT_MIN_BUMP) {
+        if (!run) run = { start: n, cells: [], invert: level, crest: -Infinity, ref };
+        run.cells.push(k);
+        run.crest = Math.max(run.crest, z0[k]);
+      } else close(n);
+      if (z0) ref = Math.min(ref, z0[k]);
+      if (z[k] > level && z[k] - level <= maxCarve) {
+        z[k] = level;
+        count++;
       } else level = z[k];
       done[k] = 1;
     }
+    run = null;
   }
   return count;
 }

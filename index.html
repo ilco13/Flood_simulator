@@ -67,6 +67,20 @@
                 <input type="checkbox" id="bati-ign" checked />
                 Bâtiments IGN (BD TOPO, avec leur hauteur) à moins d'1 km du lieu
               </label>
+              <label class="check">
+                <input type="checkbox" id="ouvr-on" checked />
+                Ponts et buses sous les routes (repérés sur les cours d'eau, dimensions estimées ; mailles de 10 m ou moins)
+              </label>
+              <div class="row2">
+              <label>Ouvertures bouchées (embâcles)
+                <select id="ouvr-obst">
+                  <option value="0" selected>aucune</option>
+                  <option value="0.33">un tiers</option>
+                  <option value="0.66">deux tiers</option>
+                  <option value="1">totalement</option>
+                </select>
+              </label>
+              </div>
               <p class="hint">
                 Dessinez en plus les murs, et les bâtiments trop récents pour la BD TOPO : l'eau devra les contourner
                 ou passer par-dessus.
