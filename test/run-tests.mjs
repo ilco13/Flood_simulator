@@ -276,7 +276,10 @@ await test('pont ou buse : repéré sous le remblai, capacité limitée, route s
   const t = prepareTerrain({ grid, dem, rivers, burnDepth: 0.5, structures: true });
   assert.equal(t.structures?.length, 1, 'un ouvrage repéré');
   const st = t.structures[0];
-  for (const k of st.cells) assert.equal(t.z[k], dem[k], 'remblai rétabli');
+  // Passage libre par défaut : lit creusé sous le remblai ; remblai rétabli pour un ouvrage dimensionné
+  for (const k of st.cells) assert.ok(t.z[k] < st.invert + 0.6, 'lit creusé sous le remblai');
+  const zr = t.z.slice();
+  for (const k of st.cells) zr[k] = dem[k];
   assert.ok(st.crest - st.invert > 2.5 && st.crest - st.invert < 4, `hauteur du remblai ${st.crest - st.invert}`);
   assert.ok(Math.floor(st.up / nx) < 29 && Math.floor(st.down / nx) > 30, 'entrée en amont, sortie en aval');
   // Lois de débit : continues entre écoulement libre et en charge, nulles sans charge
@@ -291,9 +294,9 @@ await test('pont ou buse : repéré sous le remblai, capacité limitée, route s
     assert.ok(Math.abs(culvertQ(st.invert + d.a, -Infinity, st.invert, d.a, d.b) - d.qd) < 0.1 * d.qd + 0.3, JSON.stringify(d));
   }
   // Apport de 3 m³/s à l'amont : grande buse → passe dessous ; petite → route submergée
-  for (let i = 0; i < nx; i++) t.z[i] += 20; // bord amont fermé
+  for (let i = 0; i < nx; i++) zr[i] += 20; // bord amont fermé
   const run = async (a, b) => {
-    const model = { nx, ny, dx, z: t.z, S: new Float32Array(N).fill(-1), manning: new Float32Array(N).fill(0.04),
+    const model = { nx, ny, dx, z: zr, S: new Float32Array(N).fill(-1), manning: new Float32Array(N).fill(0.04),
       inflow: { cells: Int32Array.from([2 * nx + 15]), Q: 3, ramp: 300 },
       links: [{ ku: st.up, kd: st.down, inv: st.invert, a, b }] };
     const be = new CpuBackend(model, []);
@@ -306,6 +309,17 @@ await test('pont ou buse : repéré sous le remblai, capacité limitée, route s
   };
   const big = await run(2, 3);
   assert.ok(big.over < 0.01 && Math.abs(big.q - 3) < 0.3, `grande buse : ${big.q.toFixed(2)} m³/s, ${big.over.toFixed(2)} m sur la route`);
+  // Passage libre (lit creusé, sans ouvrage) : pas d'eau sur la route
+  {
+    const zf = t.z.slice();
+    for (let i = 0; i < nx; i++) zf[i] += 20;
+    const be = new CpuBackend({ nx, ny, dx, z: zf, S: new Float32Array(N).fill(-1), manning: new Float32Array(N).fill(0.04), inflow: { cells: Int32Array.from([2 * nx + 15]), Q: 3, ramp: 300 } }, []);
+    await simulate(be, { hyeto: makeHyetograph({ totalMm: 0, durationH: 1, shape: 'uniform' }), totalTime: 3600, gaugeEvery: 300, snapshotEvery: 3600 });
+    const mx = await be.readMaxima();
+    let road = 0;
+    for (let i = 0; i < nx; i++) if (Math.abs(i - 15) > 1) for (const j of [29, 30]) road = Math.max(road, mx.hmax[j * nx + i]);
+    assert.ok(road < 0.01, `passage libre : ${road.toFixed(2)} m sur la route`);
+  }
   const small = await run(0.5, 0.4);
   assert.ok(small.over > 0.05 && small.q < 1, `petite buse : ${small.q.toFixed(2)} m³/s, ${small.over.toFixed(2)} m sur la route`);
   for (const r of [big, small]) {

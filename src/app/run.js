@@ -228,6 +228,11 @@ async function runOnce(opts = {}) {
     // Ponts et buses : passage limité sous le remblai, l'eau passe au-dessus au-delà
     const st = buildLinks(data, grid, p);
     model.links = st.links;
+    if (st.restore.length) {
+      // Ouvrages dimensionnés : remblai rétabli (copie : l'affichage garde le relief préparé)
+      model.z = model.z.slice();
+      for (const k of st.restore) model.z[k] = data.dem[k];
+    }
     run.structures = st.info;
     showStructures(st.info);
     // Épisode réel : pluie variable dans l'espace (blocs d'environ 1 km, d'après les stations)

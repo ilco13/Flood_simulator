@@ -13,14 +13,11 @@ export function prepareTerrain({ grid, dem, rivers, burnDepth, outlet, upstreamO
   const z = dem.slice();
   const raw = structures ? [] : null;
   const burned = rivers && burnDepth > 0 ? burnRivers(grid, z, rivers, burnDepth, undefined, raw) : 0;
-  // Ouvrages sous les routes : remblai rétabli, l'eau passe par l'ouvrage (capacité limitée)
+  // Ouvrages sous les routes : repérés ; le lit reste creusé sous le remblai (passage libre)
+  // tant que leurs dimensions ne sont pas connues (voir structures.js : remblai rétabli au calcul)
   const structs = raw?.length ? selectStructures(grid, z, dem, raw) : [];
   // Ouvrages dessinés par l'utilisateur (absents du MNT, qui est un modèle du sol nu).
   let protect = obstacles?.length ? applyObstacles(grid, z, obstacles) : null;
-  if (structs.length) {
-    protect ??= new Uint8Array(z.length);
-    for (const s of structs) for (const k of s.cells) protect[k] = 1;
-  }
   // Bâtiments BD TOPO : mailles bâties à plus de moitié relevées ; les autres gardent le
   // passage, avec un frottement accru (renvoyé dans bldFrac).
   let bld = null;
@@ -99,8 +96,9 @@ export function prepareTerrain({ grid, dem, rivers, burnDepth, outlet, upstreamO
 /**
  * Ouvrages sous les routes retenus : remblai court (au plus 60 m ou 2 mailles le long du cours
  * d'eau) qui barre vraiment la vallée : pour passer de l'amont à l'aval sans le traverser, l'eau
- * doit monter d'au moins STRUCT_MIN_BUMP (sinon ce n'est qu'une bosse du lit, contournée). Son
- * relief d'origine est rétabli ; une maille ne sert qu'à un ouvrage.
+ * doit monter d'au moins STRUCT_MIN_BUMP (sinon ce n'est qu'une bosse du lit, contournée). Le lit
+ * reste creusé (passage libre) ; le remblai est rétabli au calcul si l'ouvrage est dimensionné
+ * (structures.js). Une maille ne sert qu'à un ouvrage.
  */
 export function selectStructures(grid, z, dem, raw) {
   const { nx, dx, xmin, ymax } = grid;
@@ -114,7 +112,6 @@ export function selectStructures(grid, z, dem, raw) {
     const crest = Math.min(s.crest, spill);
     if (crest - (s.base ?? Math.max(dem[s.up], dem[s.down])) <= STRUCT_MIN_BUMP) continue;
     ks.forEach((k) => used.add(k));
-    for (const k of s.cells) z[k] = dem[k];
     const mid = s.cells[s.cells.length >> 1];
     const i = mid % nx;
     const j = (mid - i) / nx;
