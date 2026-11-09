@@ -189,9 +189,37 @@ export function obstacleRaise(pts) {
       }
     }
   }
-  // Bâtiments IGN : mailles relevées dans la simulation (hauteur = relief simulé − MNT)
+  // Bâtiments IGN : contours BD TOPO (même hauteur que dans le relief simulé)
   const d = state.data;
   const g = state.run?.grid;
+  if (d?.buildings?.length && pts.length) {
+    let x0 = Infinity;
+    let y0 = Infinity;
+    let x1 = -Infinity;
+    let y1 = -Infinity;
+    for (const p of pts) {
+      x0 = Math.min(x0, p.x);
+      y0 = Math.min(y0, p.y);
+      x1 = Math.max(x1, p.x);
+      y1 = Math.max(y1, p.y);
+    }
+    const near = d.buildings.filter((b) => b.bb[0] <= x1 && b.bb[2] >= x0 && b.bb[1] <= y1 && b.bb[3] >= y0);
+    for (let i = 0; i < pts.length; i++) {
+      if (out.kind[i]) continue;
+      const { x, y } = pts[i];
+      for (const b of near) {
+        if (x < b.bb[0] || x > b.bb[2] || y < b.bb[1] || y > b.bb[3]) continue;
+        // dans l'anneau extérieur et hors des cours intérieures
+        if (!inPoly(b.rings[0], x, y) || b.rings.slice(1).some((r) => inPoly(r, x, y))) continue;
+        if (b.h > out[i]) {
+          out[i] = b.h;
+          out.kind[i] = 3;
+        }
+      }
+    }
+    return out;
+  }
+  // Simulation rouverte (contours non enregistrés) : mailles relevées (relief simulé − MNT)
   if (d?.bldFrac && d.z && g)
     for (let i = 0; i < pts.length; i++) {
       if (out.kind[i]) continue;

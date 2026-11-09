@@ -141,6 +141,14 @@ self.onmessage = async (e) => {
         structures: structs,
         bldCells: terrain.bldCells || 0,
         bldCount: terrain.bldCount || 0,
+        // Contours des bâtiments (dessin de la coupe), hauteur plafonnée comme dans le relief
+        buildings: buildings?.length
+          ? buildings.map((b) => {
+              const xs = b.rings[0].map((p) => p[0]);
+              const ys = b.rings[0].map((p) => p[1]);
+              return { h: Math.min(15, b.h), rings: b.rings, bb: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)] };
+            })
+          : null,
         gauges,
         outline,
         warnings: [...new Set(warnings)],
