@@ -115,7 +115,7 @@ export function sampleSection({ grid, zSim, A, B, n, depthAt, maxAt }) {
       pts.push({ d: f * L, x, y, zc: NaN, zi: NaN, h: 0, hmax: 0 });
       continue;
     }
-    pts.push({ d: f * L, x, y, zc: zSim[c.k], zi: bilinear(grid, zSim, x, y), h: depthAt(c.k), hmax: maxAt(c.k) });
+    pts.push({ d: f * L, x, y, k: c.k, zc: zSim[c.k], zi: bilinear(grid, zSim, x, y), h: depthAt(c.k), hmax: maxAt(c.k) });
   }
   return { pts, L, labels: [compass(A[0] - B[0], A[1] - B[1]), compass(B[0] - A[0], B[1] - A[1])] };
 }
@@ -276,10 +276,10 @@ export function drawSection(canvas, s) {
   }
   // Niveaux d'eau (surface libre) à l'instant et maximum, tirés de la simulation
   // Même seuil pour les deux (10 cm) : la lame de ruissellement sur les versants n'est pas tracée.
-  const level = poolLevels(pts, ground, (p) => p.h, 0.1, s.cell);
+  const level = poolLevels(pts, ground, (p) => p.h, 0.1);
   // Maximum (connu en fin de calcul) : jamais sous l'eau de l'instant affiché.
   const hasMax = pts.some((p) => p.hmax > 0);
-  const levelMax = hasMax ? poolLevels(pts, ground, (p) => Math.max(p.hmax, p.h), 0.1, s.cell) : new Float32Array(n).fill(NaN);
+  const levelMax = hasMax ? poolLevels(pts, ground, (p) => Math.max(p.hmax, p.h), 0.1) : new Float32Array(n).fill(NaN);
   if (hasMax) for (let i = 0; i < n; i++) if (Number.isFinite(level[i]) && !(levelMax[i] >= level[i])) levelMax[i] = level[i];
 
   let zmin = Infinity;
@@ -552,68 +552,97 @@ export function drawSection(canvas, s) {
 }
 
 /**
- * Surface libre de l'eau le long de la coupe.
- * Pour chaque suite d'échantillons mouillés dans la simulation, le niveau est la cote d'eau
- * simulée (terrain du modèle + hauteur), moyennée en donnant plus de poids aux mailles les plus
- * profondes : la surface est plate en travers, comme dans la réalité. Ce niveau est ensuite posé
- * sur le terrain LiDAR fin et propagé de part et d'autre tant que le terrain reste plus bas que
- * lui : l'eau remplit le fond du lit et passe par-dessus une berge plus basse que la surface,
- * sans jamais « tenir debout » au-dessus d'une berge.
+ * Surface libre le long de la coupe, posée sur le terrain fin (LiDAR).
+ * Le volume d'eau de chaque maille de calcul (hauteur simulée × longueur de coupe dans la maille)
+ * remplit d'abord les points les plus bas du terrain fin de la maille, sous une surface
+ * horizontale : l'eau occupe le fond du lit et ne « tient » jamais debout contre une berge.
+ * Deux mailles dont l'eau passe la limite commune forment un seul plan d'eau (même niveau) ;
+ * l'eau déborde dans les mailles voisines sèches tant que leur terrain est plus bas que la
+ * surface (le volume est conservé : le niveau baisse à mesure qu'elle s'étale).
  */
-/**
- * Surface libre le long de la coupe. Dans chaque tronçon mouillé (hauteur > thr), le niveau
- * en un point est la moyenne pondérée par la hauteur des cotes d'eau (zc + h) des mailles
- * voisines (± 1,5 maille) : surface lisse sur le terrain LiDAR fin, mais qui suit la pente
- * de l'écoulement au lieu d'être aplatie à la moyenne de tout le tronçon.
- */
-function poolLevels(pts, ground, depthOf, thr, cell) {
+function poolLevels(pts, ground, depthOf, thr) {
   const n = pts.length;
   const out = new Float32Array(n).fill(NaN);
   const step = n > 1 ? pts[1].d - pts[0].d : 1;
-  const half = Math.max(1, Math.round((1.5 * (cell || step)) / (step || 1)));
-  const wet = (k) => depthOf(pts[k]) > thr && Number.isFinite(pts[k].zc);
-  let i = 0;
-  while (i < n) {
-    if (!wet(i)) {
-      i++;
-      continue;
-    }
+  // Tronçons de la coupe dans une même maille de calcul
+  const segs = [];
+  for (let i = 0; i < n; ) {
+    const k = pts[i].k;
     let j = i;
-    while (j < n && wet(j)) j++;
-    const lv = new Float64Array(j - i);
-    for (let k = i; k < j; k++) {
-      let sw = 0;
-      let swl = 0;
-      for (let m = Math.max(i, k - half); m <= Math.min(j - 1, k + half); m++) {
-        const h = depthOf(pts[m]);
-        sw += h;
-        swl += h * (pts[m].zc + h);
-      }
-      lv[k - i] = swl / sw;
-      // Terrain fin plus haut que le niveau simulé (lit lissé ou creusé dans le modèle) :
-      // on garde au moins la hauteur d'eau simulée posée sur le terrain fin.
-      // Hauteur dessinée bornée par la hauteur simulée de la maille : au moins celle-ci (terrain
-      // fin plus haut que le lit lissé du modèle), au plus +30 cm ou +50 % (terrain fin plus bas).
-      const hk = depthOf(pts[k]);
-      const d = Math.min(Math.max(lv[k - i] - ground[k], hk), hk + Math.max(0.3, 0.5 * hk));
-      out[k] = ground[k] + d;
-    }
-    // Bords du tronçon : l'eau déborde sur le terrain fin plus bas que le niveau, mais d'une
-    // maille au plus (au-delà, la simulation dit que c'est sec).
-    const reach = Math.max(1, Math.round((cell || step) / (step || 1)));
-    const spill = (k0, dir, edge) => {
-      const L = out[edge];
-      const he = depthOf(pts[edge]);
-      for (let k = k0, m = 0; k >= 0 && k < n && m < reach; k += dir, m++) {
-        const d = L - ground[k];
-        if (!(d > 0) || d > he + Math.max(0.3, 0.5 * he)) break;
-        if (!(out[k] >= L)) out[k] = L;
-      }
-    };
-    spill(i - 1, -1, i);
-    spill(j, 1, j - 1);
+    while (j < n && pts[j].k === k) j++;
+    if (k != null && Number.isFinite(pts[i].zc)) {
+      let h = 0;
+      for (let m = i; m < j; m++) h = Math.max(h, depthOf(pts[m]));
+      segs.push({ a: i, b: j - 1, h, V: h * (j - i) * step, wet: h > thr });
+    } else segs.push({ a: i, b: j - 1, h: 0, V: 0, wet: false, out: true });
     i = j;
   }
+  // Niveau qui loge le volume V (m² par m de largeur) sur les points a..b
+  const fill = (a, b, V) => {
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (let m = a; m <= b; m++) {
+      if (!Number.isFinite(ground[m])) continue;
+      lo = Math.min(lo, ground[m]);
+      hi = Math.max(hi, ground[m]);
+    }
+    if (!Number.isFinite(lo)) return NaN;
+    hi = Math.max(hi, lo) + V / step + 0.01;
+    for (let it = 0; it < 40; it++) {
+      const L = 0.5 * (lo + hi);
+      let A = 0;
+      for (let m = a; m <= b; m++) if (L > ground[m]) A += (L - ground[m]) * step;
+      if (A > V) hi = L;
+      else lo = L;
+    }
+    return 0.5 * (lo + hi);
+  };
+  // Plans d'eau : suites de tronçons [s0..s1], volume, niveau
+  const pools = [];
+  segs.forEach((sg, q) => {
+    if (!sg.wet) return;
+    pools.push({ s0: q, s1: q, V: sg.V, L: fill(sg.a, sg.b, sg.V), h: sg.h });
+  });
+  const touches = (L, m) => m >= 0 && m < n && L > ground[m];
+  const taken = new Set(pools.map((P) => P.s0));
+  let changed = true;
+  for (let guard = 0; changed && guard < 4 * segs.length; guard++) {
+    changed = false;
+    for (let p = 0; p < pools.length; p++) {
+      const P = pools[p];
+      // plan d'eau voisin dont l'eau touche la même limite : fusion
+      const Q = pools[p + 1];
+      if (Q && Q.s0 === P.s1 + 1) {
+        const m = segs[P.s1].b;
+        // l'eau de l'un passe la limite et coule chez l'autre : un seul plan d'eau
+        if ((touches(P.L, m) && touches(P.L, m + 1)) || (touches(Q.L, m + 1) && touches(Q.L, m))) {
+          P.s1 = Q.s1;
+          P.V += Q.V;
+          P.h = Math.max(P.h, Q.h);
+          P.L = fill(segs[P.s0].a, segs[P.s1].b, P.V);
+          pools.splice(p + 1, 1);
+          changed = true;
+          continue;
+        }
+      }
+      // débordement dans une maille voisine sèche plus basse que la surface
+      const tryspill = (side) => {
+        const q = side < 0 ? P.s0 - 1 : P.s1 + 1;
+        const sg = segs[q];
+        if (!sg || sg.wet || sg.out || taken.has(q)) return false;
+        const edge = side < 0 ? sg.b : sg.a;
+        if (!touches(P.L, edge)) return false;
+        if (side < 0) P.s0 = q;
+        else P.s1 = q;
+        taken.add(q);
+        P.V += sg.V;
+        P.L = fill(segs[P.s0].a, segs[P.s1].b, P.V);
+        return true;
+      };
+      if (tryspill(-1) || tryspill(1)) changed = true;
+    }
+  }
+  for (const P of pools) for (let m = segs[P.s0].a; m <= segs[P.s1].b; m++) if (P.L > ground[m]) out[m] = P.L;
   return out;
 }
 

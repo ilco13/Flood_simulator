@@ -140,24 +140,30 @@ async function runSite(browser, key) {
     const sec = await page.evaluate(() => {
       const s = window.floodApp.section;
       if (!s?.helper) return null;
-      let worst = 0;
-      let simMax = 0;
       const pts = s.sample.pts;
-      const cell = window.floodApp.run.grid.dx;
       const step = pts.length > 1 ? pts[1].d - pts[0].d : 1;
-      const r = Math.max(1, Math.round(cell / step));
+      // Volume dessiné (eau maximale) et volume simulé le long de la coupe (m² par m de largeur)
+      let drawn = 0;
+      let sim = 0;
+      let simMax = 0;
+      let wall = 0;
+      const inf = pts.map((_, i) => s.helper.info(i));
       for (let i = 0; i < pts.length; i++) {
-        const inf = s.helper.info(i);
+        const d = inf[i].maxDepth || 0;
+        drawn += d * step;
+        if (pts[i].hmax > 0.1) sim += pts[i].hmax * step;
         simMax = Math.max(simMax, pts[i].hmax);
-        // Hauteur simulée de référence : la plus forte à moins d'une maille (le dessin peut
-        // déborder d'une maille sur le terrain fin plus bas) ; écart toléré +30 cm ou +50 %.
-        let h = 0;
-        for (let m = Math.max(0, i - r); m <= Math.min(pts.length - 1, i + r); m++) h = Math.max(h, pts[m].hmax);
-        worst = Math.max(worst, inf.maxDepth - (h + Math.max(0.3, 0.5 * h)));
+        // « mur » : bord d'un plan d'eau dont la surface dépasse le terrain sec voisin
+        // (l'eau devrait s'étaler ; contre une berge qui remonte, c'est normal)
+        for (const j of [i - 1, i + 1]) {
+          if (d > 0 && j >= 0 && j < pts.length && !(inf[j].maxDepth > 0) && Number.isFinite(inf[j].ground) && !inf[j].obstacle)
+            wall = Math.max(wall, inf[i].ground + d - inf[j].ground);
+        }
       }
-      return { worst, simMax };
+      return { drawn, sim, simMax, wall };
     });
-    check(sec && sec.worst < 1.0, `coupe : excès de hauteur dessinée ${sec ? sec.worst.toFixed(2) : '?'} m (max simulé ${sec ? sec.simMax.toFixed(2) : '?'} m)`);
+    const vratio = sec && sec.sim > 0 ? sec.drawn / sec.sim : 1;
+    check(sec && (sec.sim < 1 || (vratio > 0.6 && vratio < 1.6)) && sec.wall < 0.5, `coupe : volume dessiné ${sec ? sec.drawn.toFixed(1) : '?'} m² pour ${sec ? sec.sim.toFixed(1) : '?'} m² simulés, bord d'eau le plus haut ${sec ? sec.wall.toFixed(2) : '?'} m (max simulé ${sec ? sec.simMax.toFixed(2) : '?'} m)`);
     // Simulation enregistrée et place utilisée affichée
     let stor = '';
     for (let i = 0; i < 20 && !/simulation/.test(stor); i++) {
